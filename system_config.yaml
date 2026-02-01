@@ -123,13 +123,13 @@ outline:
 # ----------------------------------------------------------------------------
 review:
   # 默认输出目录
-  output_dir: "综述文章"
+  output_dir: "output/综述文章"
   # 大纲输出目录
-  outline_dir: "综述大纲"
+  outline_dir: "output/综述大纲"
   # 原始AI输出目录（用于核对）
-  raw_output_dir: "综述AI返回原始数据（用于核对）"
+  raw_output_dir: "output/综述AI返回原始数据"
   # 检索结果输出目录
-  search_results_dir: "检索结果"
+  search_results_dir: "output/文献检索结果"
   # 默认文章温度参数（稍高以增加创意性）
   article_temperature: 0.3
 
