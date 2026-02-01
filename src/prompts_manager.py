@@ -12,14 +12,18 @@ from datetime import datetime
 
 class PromptsManager:
     """提示词配置管理器"""
-    
-    def __init__(self, config_path: str = "prompts/prompts_config.yaml"):
+
+    def __init__(self, config_path: str = None):
         """
         初始化提示词管理器
-        
+
         Args:
-            config_path: 配置文件路径
+            config_path: 配置文件路径，默认为项目根目录下的 prompts/prompts_config.yaml
         """
+        if config_path is None:
+            # 使用项目根目录下的默认路径
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(project_root, "prompts", "prompts_config.yaml")
         self.config_path = config_path
         self.config = {}
         self.load_config()

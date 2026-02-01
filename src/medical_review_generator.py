@@ -234,11 +234,10 @@ class PandocExporter:
         if custom_template and os.path.exists(custom_template):
             cmd.extend(['--reference-doc', custom_template])
         elif style == "academic":
-            # 学术风格：使用医学论文模板
-            project_root = Path(__file__).parent.parent
-            medical_template = project_root / 'tools' / 'medical_template.docx'
-            if medical_template.exists():
-                cmd.extend(['--reference-doc', str(medical_template)])
+            # 学术风格：使用配置文件中的医学论文模板
+            medical_template = system_config.MEDICAL_TEMPLATE
+            if medical_template and os.path.exists(medical_template):
+                cmd.extend(['--reference-doc', medical_template])
             else:
                 # 模板不存在时使用 Times 字体
                 cmd.extend(['--variable', 'fontfamily=Times'])
@@ -558,42 +557,40 @@ class MedicalReviewGenerator:
     
     def _normalize_paragraph_indentation(self, content: str) -> str:
         """
-        标准化段落缩进，确保每个段落只有两个全角空格缩进
-        
+        标准化段落缩进，移除AI生成的全角空格缩进
+        让DOCX模板来控制首行缩进
+
         Args:
             content: 原始内容
-            
+
         Returns:
-            str: 标准化缩进后的内容
+            str: 移除缩进后的内容
         """
         if not content:
             return content
-        
+
         lines = content.split('\n')
         processed_lines = []
-        
+
         for line in lines:
             # 如果是空行，直接保留
             if not line.strip():
                 processed_lines.append(line)
                 continue
-            
-            # 如果是标题行（以#开头），不处理缩进
+
+            # 如果是标题行（以#开头），不处理
             if line.strip().startswith('#'):
                 processed_lines.append(line)
                 continue
-            
-            # 处理段落缩进
-            stripped_line = line.lstrip('　 ')  # 移除开头的全角空格和普通空格
-            
-            # 如果移除空格后还有内容，说明这是一个需要缩进的段落
+
+            # 移除开头的全角空格和普通空格，不再添加缩进
+            stripped_line = line.lstrip('　 ')
+
             if stripped_line:
-                # 统一添加两个全角空格
-                processed_lines.append('　　' + stripped_line)
+                processed_lines.append(stripped_line)
             else:
-                # 如果移除空格后没有内容，保留原行
                 processed_lines.append(line)
-        
+
         return '\n'.join(processed_lines)
     
     def generate_complete_review_article(self, outline_file: str, literature_file: str, title: str = None) -> str:
@@ -778,13 +775,13 @@ class MedicalReviewGenerator:
             str: 重新编号后的文章内容
         """
         import re
-        
+
         # 保存原始内容长度用于调试
         original_length = len(article_content)
         print(f"重新编号前内容长度: {original_length} 字符")
-        
+
         # 1. 提取文章中所有的引用标记，支持单个和多个引用
-        # 匹配格式: [数字] 或 [数字, 数字, ...] 
+        # 匹配格式: [数字] 或 [数字, 数字, ...]
         citation_pattern = r'\[([0-9, ]+)\]'
         citation_matches = re.findall(citation_pattern, article_content)
         
@@ -916,52 +913,137 @@ class MedicalReviewGenerator:
     
     def _save_raw_output(self, raw_content: str, title: str):
         """
-        保存AI的原始输出到md文件
-        
+        保存AI的原始输出，根据配置决定输出格式
+
         Args:
             raw_content: AI的原始输出内容
             title: 文章标题
         """
         try:
-            # 获取项目根目录
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            raw_docs_dir = os.path.join(project_root, "综述AI返回原始数据（用于核对）")
-            
-            # 确保原始文档目录存在
+            # 使用配置的输出目录
+            raw_docs_dir = os.path.join("output", "综述AI返回原始数据")
             os.makedirs(raw_docs_dir, exist_ok=True)
-            
+
             # 生成文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # 清理标题，移除特殊字符
             clean_title = re.sub(r'[^\w\u4e00-\u9fff\s-]', '', title)
-            clean_title = clean_title.strip()[:30]  # 限制长度
-            clean_title = re.sub(r'\s+', '_', clean_title)  # 替换空格为下划线
-            
-            filename = f"原始输出-{clean_title}-{timestamp}.md"
-            filepath = os.path.join(raw_docs_dir, filename)
-            
+            clean_title = clean_title.strip()[:30]
+            clean_title = re.sub(r'\s+', '_', clean_title)
+
+            base_filename = f"原始输出-{clean_title}-{timestamp}"
+
             # 构建完整的原始文档内容
             raw_document = f"""# AI原始输出文档
 
-**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
-**文章标题**: {title}  
-**模型**: {self.model_id}  
+**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**文章标题**: {title}
+**模型**: {self.model_id}
 **输出长度**: {len(raw_content)} 字符
 
 ---
 
 {raw_content}
 """
-            
-            # 保存原始输出
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(raw_document)
-            
-            print(f"原始AI输出已保存: {filepath}")
-            
+            # 获取导出格式配置
+            export_format = system_config.REVIEW_FORMAT.lower()
+
+            # 根据配置决定输出格式
+            if export_format in ['md', 'both']:
+                md_path = os.path.join(raw_docs_dir, f"{base_filename}.md")
+                with open(md_path, 'w', encoding='utf-8') as f:
+                    f.write(raw_document)
+                print(f"原始AI输出(MD)已保存: {md_path}")
+
+            if export_format in ['docx', 'both']:
+                docx_path = os.path.join(raw_docs_dir, f"{base_filename}.docx")
+                self._convert_raw_to_docx(raw_document, docx_path)
+
         except Exception as e:
             print(f"保存原始输出失败: {e}")
-    
+
+    def _convert_raw_to_docx(self, content: str, output_path: str):
+        """将原始输出转换为DOCX格式"""
+        # 优先使用Pandoc
+        pandoc_path = self._find_pandoc()
+        if pandoc_path:
+            try:
+                import tempfile
+                import subprocess
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.md',
+                                                delete=False, encoding='utf-8') as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+
+                cmd = [pandoc_path, tmp_path, '-o', output_path]
+                template = system_config.MEDICAL_TEMPLATE
+                if template and os.path.exists(template):
+                    cmd.extend(['--reference-doc', template])
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                os.remove(tmp_path)
+
+                if result.returncode == 0:
+                    print(f"原始AI输出(DOCX)已保存: {output_path}")
+                    return
+            except Exception as e:
+                print(f"[WARN] Pandoc转换失败: {e}")
+
+        # 备用：使用python-docx
+        self._convert_raw_to_docx_native(content, output_path)
+
+    def _find_pandoc(self):
+        """查找Pandoc可执行文件"""
+        import platform
+        import shutil
+        from pathlib import Path
+
+        project_root = Path(__file__).parent.parent
+        if platform.system() == 'Windows':
+            local = project_root / 'tools' / 'pandoc' / 'windows' / 'pandoc.exe'
+        else:
+            local = project_root / 'tools' / 'pandoc' / 'linux' / 'pandoc'
+
+        if local.exists():
+            return str(local)
+        return shutil.which('pandoc')
+
+    def _convert_raw_to_docx_native(self, content: str, output_path: str):
+        """使用python-docx转换"""
+        try:
+            from docx import Document
+            from docx.shared import Cm
+        except ImportError:
+            print("[WARN] python-docx未安装")
+            return
+
+        try:
+            doc = Document()
+            section = doc.sections[0]
+            section.left_margin = Cm(2.5)
+            section.right_margin = Cm(2.5)
+
+            for line in content.split('\n'):
+                line = line.rstrip()
+                if not line:
+                    continue
+                if line.startswith('# '):
+                    doc.add_heading(line[2:], level=1)
+                elif line.startswith('## '):
+                    doc.add_heading(line[3:], level=2)
+                elif line.startswith('### '):
+                    doc.add_heading(line[4:], level=3)
+                elif line.startswith('- '):
+                    doc.add_paragraph(line[2:], style='List Bullet')
+                else:
+                    # 普通段落 - 设置首行缩进2字符
+                    p = doc.add_paragraph(line)
+                    p.paragraph_format.first_line_indent = Cm(0.74)
+
+            doc.save(output_path)
+            print(f"原始AI输出(DOCX)已保存: {output_path}")
+        except Exception as e:
+            print(f"[WARN] DOCX转换失败: {e}")
+
     def _clean_ai_intro(self, content: str) -> str:
         """清理AI生成内容前面的引导语，只保留文章标题开始的内容"""
         if not content:
@@ -987,19 +1069,20 @@ class MedicalReviewGenerator:
         print("警告: 未找到标题行或内容过短，返回原始内容")
         return content
     
-    def save_article(self, content: str, filename: str = None, user_input: str = None, 
-                     export_docx: bool = False) -> tuple:
+    def save_article(self, content: str, filename: str = None, user_input: str = None,
+                     export_docx: bool = False, export_md: bool = True) -> tuple:
         """
-        保存文章到文件，支持可选的DOCX导出
-        
+        保存文章到文件，支持可选的MD和DOCX导出
+
         Args:
             content: 文章内容
             filename: 文件名（可选）
             user_input: 用户输入内容（可选）
-            export_docx: 是否同时导出DOCX格式
-            
+            export_docx: 是否导出DOCX格式
+            export_md: 是否导出MD格式（默认True）
+
         Returns:
-            tuple: (md_file_path, docx_file_path) 如果不导出docx，第二个值为None
+            tuple: (md_file_path, docx_file_path) 如果不导出对应格式，值为None
         """
         if not filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1012,46 +1095,62 @@ class MedicalReviewGenerator:
                 filename = f"综述-{clean_input}-{timestamp}.md"
             else:
                 filename = f"综述-{timestamp}.md"
-        
+
         filepath = os.path.join(self.output_dir, filename)
-        
+
         try:
             # 确保输出目录存在（在实际保存时创建）
             os.makedirs(self.output_dir, exist_ok=True)
-            
-            # 1. 保存Markdown文件
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            print(f"文章已保存到: {filepath}")
-            
-            # 2. 可选导出DOCX格式
+
+            md_path = None
             docx_path = None
+
+            # 1. 可选保存Markdown文件
+            if export_md:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                md_path = filepath
+                print(f"文章(MD)已保存到: {filepath}")
+
+            # 2. 可选导出DOCX格式
             if export_docx and self.pandoc_exporter.is_available():
                 try:
-                    docx_path = self.pandoc_exporter.convert_to_docx(
-                        filepath, 
-                        style="academic"
-                    )
-                    print(f"DOCX版本已导出: {docx_path}")
+                    # 计算正确的DOCX输出路径
+                    docx_output_path = filepath.replace('.md', '.docx')
+
+                    # 如果没有保存MD文件，需要创建临时文件用于转换
+                    if not export_md:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.md',
+                                                        delete=False, encoding='utf-8') as tmp:
+                            tmp.write(content)
+                            temp_md = tmp.name
+                        docx_path = self.pandoc_exporter.convert_to_docx(
+                            temp_md, output_file=docx_output_path, style="academic"
+                        )
+                        os.remove(temp_md)
+                    else:
+                        docx_path = self.pandoc_exporter.convert_to_docx(
+                            filepath, style="academic"
+                        )
+                    print(f"文章(DOCX)已导出: {docx_path}")
                 except Exception as docx_error:
                     print(f"DOCX导出失败: {docx_error}")
-                    # 即使DOCX导出失败，MD文件仍然成功保存
             elif export_docx and not self.pandoc_exporter.is_available():
                 print("Pandoc不可用，跳过DOCX导出")
-            
-            return filepath, docx_path
-            
+
+            return md_path, docx_path
+
         except Exception as e:
             print(f"保存文章失败: {e}")
-            return "", None
+            return None, None
     
-    def generate_from_files(self, outline_file: str, literature_file: str, 
-                          title: str = None, output_filename: str = None, user_input: str = None, 
-                          export_docx: bool = False) -> tuple:
+    def generate_from_files(self, outline_file: str, literature_file: str,
+                          title: str = None, output_filename: str = None, user_input: str = None,
+                          export_docx: bool = False, export_md: bool = True) -> tuple:
         """
         从文件生成综述文章
-        
+
         Args:
             outline_file: 大纲文件路径
             literature_file: 文献文件路径
@@ -1059,9 +1158,10 @@ class MedicalReviewGenerator:
             output_filename: 输出文件名
             user_input: 用户输入内容
             export_docx: 是否导出DOCX格式
-            
+            export_md: 是否导出MD格式（默认True）
+
         Returns:
-            tuple: (md_file_path, docx_file_path) 如果不导出docx，第二个值为None
+            tuple: (md_file_path, docx_file_path) 如果不导出对应格式，值为None
         """
         # 生成文章
         article_content = self.generate_complete_review_article(outline_file, literature_file, title)
@@ -1070,8 +1170,10 @@ class MedicalReviewGenerator:
             print("文章生成失败")
             return "", None
         
-        # 保存文章（支持DOCX导出）
-        md_path, docx_path = self.save_article(article_content, output_filename, user_input, export_docx)
+        # 保存文章（支持MD和DOCX导出）
+        md_path, docx_path = self.save_article(
+            article_content, output_filename, user_input, export_docx, export_md
+        )
         
         # 显示统计信息
         word_count = len(article_content.replace(' ', '').replace('\n', ''))

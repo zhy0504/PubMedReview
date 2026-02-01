@@ -193,6 +193,22 @@ class SystemConfig:
     def PREFERRED_MODEL(self) -> str:
         return self._get_nested('ai', 'preferred_model', default=self._defaults['PREFERRED_MODEL'])
 
+    # ==================== 导出配置 ====================
+    @property
+    def REVIEW_FORMAT(self) -> str:
+        """综述输出格式: md, docx, both"""
+        return self._get_nested('export', 'review_format', default='both')
+
+    @property
+    def DOCX_STYLE(self) -> str:
+        """DOCX导出样式: academic, simple"""
+        return self._get_nested('export', 'docx_style', default='academic')
+
+    @property
+    def MEDICAL_TEMPLATE(self) -> str:
+        """医学论文模板路径"""
+        return self._get_nested('export', 'medical_template', default='tools/medical_template.docx')
+
 
 # 全局配置实例
 system_config = SystemConfig()

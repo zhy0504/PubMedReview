@@ -378,35 +378,28 @@ class IntentAnalyzer:
             if not cached_model_available:
                 print(f"[VALIDATE] 模型 {cached_config.model_id} 不在可用模型列表中")
                 return False
-            
-            print(f"[VALIDATE] 模型 {cached_config.model_id} 在可用列表中，跳过API测试以节省成本")
-            return True
-            
-            # 注释掉的代码：如果需要更严格的验证，可以启用实际的API调用测试
-            # 但这会产生API调用成本，建议只在必要时启用
-            """
-            # 2. 发送一个简单的测试请求验证模型是否真正可用
-            test_messages = [ChatMessage(role="user", content="测试")]
+
+            # 2. 发送简单测试请求验证模型是否真正可用
+            print(f"[VALIDATE] 测试模型 {cached_config.model_id} 的API连接...")
+            test_messages = [ChatMessage(role="user", content="hi")]
             test_params = {
                 "temperature": 0.1,
-                "max_tokens": 10  # 限制token数量以减少成本
+                "max_tokens": 5,
+                "stream": False
             }
-            
-            # 设置较短的超时时间进行快速验证
+
             response = self.adapter.send_message(
-                test_messages, 
-                cached_config.model_id, 
+                test_messages,
+                cached_config.model_id,
                 test_params
             )
-            
-            # 检查响应是否有效
+
             if response and len(str(response).strip()) > 0:
                 print(f"[VALIDATE] 模型 {cached_config.model_id} 验证成功")
                 return True
             else:
                 print(f"[VALIDATE] 模型 {cached_config.model_id} 响应无效")
                 return False
-            """
                 
         except Exception as e:
             print(f"[VALIDATE] 模型验证失败: {e}")

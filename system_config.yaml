@@ -152,10 +152,8 @@ logging:
 # 导出配置
 # ----------------------------------------------------------------------------
 export:
-  # 支持的导出格式
-  supported_formats: ["md", "csv", "json", "bibtex", "docx"]
-  # 默认导出格式
-  default_format: "md"
+  # 综述输出格式: md, docx, both (同时输出md和docx)
+  review_format: "docx"
   # DOCX导出样式: academic, simple
   docx_style: "academic"
   # 医学论文模板路径（用于 Pandoc 转换）

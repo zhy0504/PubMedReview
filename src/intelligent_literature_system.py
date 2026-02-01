@@ -27,6 +27,7 @@ from literature_filter import LiteratureFilter, FilterConfig, JournalInfoCache
 from review_outline_generator import ReviewOutlineGenerator
 from medical_review_generator import MedicalReviewGenerator
 from data_processor import JournalDataProcessor
+from shared_config import system_config
 
 
 class SystemCleaner:
@@ -1267,17 +1268,23 @@ class IntelligentLiteratureSystem:
                 review_content = cached_article
                 success = True
             else:
+                # 根据配置决定是否导出DOCX
+                export_format = system_config.REVIEW_FORMAT.lower()
+                should_export_docx = export_format in ['docx', 'both']
+                should_export_md = export_format in ['md', 'both']
+
                 md_path, docx_path = self.review_generator.generate_from_files(
                     outline_file=temp_outline_file,
                     literature_file=temp_literature_file,
                     title=review_title,
                     output_filename=output_file,
                     user_input=user_query,
-                    export_docx=True  # 默认导出DOCX格式
+                    export_docx=should_export_docx,
+                    export_md=should_export_md
                 )
-                
-                success = bool(md_path)  # 如果MD文件生成成功就算成功
-                
+
+                success = bool(md_path or docx_path)  # MD或DOCX任一成功就算成功
+
                 if not success:
                     print("综述文章生成失败，尝试备用方法...")
                     # 尝试直接返回生成的内容
@@ -1304,12 +1311,13 @@ class IntelligentLiteratureSystem:
                     except Exception as e:
                         print(f"备用方法也失败: {e}")
                         return {"success": False, "error": "综述文章生成失败"}
-            
+
             if success:
-                # 确保综述文章文件存在
-                full_path = os.path.join("output", "综述文章", output_file)
-                if os.path.exists(full_path):
-                    print(f"综述文章生成完成: {full_path}")
+                # 根据实际生成的文件检查
+                if md_path and os.path.exists(md_path):
+                    print(f"综述文章生成完成: {md_path}")
+                elif docx_path and os.path.exists(docx_path):
+                    print(f"综述文章生成完成: {docx_path}")
                 else:
                     print("主方法生成完成但未找到文件")
             else:
@@ -1369,46 +1377,204 @@ class IntelligentLiteratureSystem:
     def _save_outline_to_file(self, user_query: str, research_topic: str) -> str:
         """
         保存综述大纲到工作目录的综述大纲文件夹
-        
+        根据 system_config.REVIEW_FORMAT 配置决定输出格式
+
         Args:
             user_query: 用户原始查询内容
             research_topic: 研究主题
-            
+
         Returns:
-            保存的文件路径
+            保存的文件路径（返回md文件路径，如果有的话）
         """
         try:
             import re
             import os
+            import subprocess
             from datetime import datetime
-            
+
             # 创建综述大纲目录
             outline_dir = os.path.join("output", "综述大纲")
             os.makedirs(outline_dir, exist_ok=True)
-            
+
             # 清理用户输入内容用于文件名
             safe_user_input = re.sub(r'[^\w\s\u4e00-\u9fff\-]', '', user_query)
             safe_user_input = re.sub(r'\s+', '_', safe_user_input.strip())
             safe_user_input = safe_user_input[:50]  # 限制长度
-            
+
             # 生成时间戳
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # 构建文件名：综述大纲-用户输入内容-时间戳.md
-            filename = f"综述大纲-{safe_user_input}-{timestamp}.md"
-            file_path = os.path.join(outline_dir, filename)
-            
-            # 写入文件
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(self.outline_content)
-            
-            print(f"综述大纲已保存: {file_path}")
-            return file_path
-            
+
+            # 获取导出格式配置
+            export_format = system_config.REVIEW_FORMAT.lower()
+
+            md_path = None
+            docx_path = None
+
+            # 基础文件名（不含扩展名）
+            base_filename = f"综述大纲-{safe_user_input}-{timestamp}"
+
+            # 根据配置决定输出格式
+            if export_format in ['md', 'both']:
+                md_filename = f"{base_filename}.md"
+                md_path = os.path.join(outline_dir, md_filename)
+                with open(md_path, 'w', encoding='utf-8') as f:
+                    f.write(self.outline_content)
+                print(f"综述大纲(MD)已保存: {md_path}")
+
+            if export_format in ['docx', 'both']:
+                docx_filename = f"{base_filename}.docx"
+                docx_path = os.path.join(outline_dir, docx_filename)
+                docx_path = self._convert_md_to_docx(self.outline_content, docx_path)
+                if docx_path:
+                    print(f"综述大纲(DOCX)已保存: {docx_path}")
+
+            # 返回md路径（优先）或docx路径
+            return md_path or docx_path
+
         except Exception as e:
             print(f"保存综述大纲失败: {e}")
             return None
-    
+
+    def _convert_md_to_docx(self, md_content: str, output_path: str) -> Optional[str]:
+        """
+        将Markdown内容转换为DOCX格式
+        优先使用Pandoc，如果不可用则使用python-docx
+
+        Args:
+            md_content: Markdown内容
+            output_path: 输出DOCX文件路径
+
+        Returns:
+            成功返回输出路径，失败返回None
+        """
+        import subprocess
+        import tempfile
+
+        # 方法1：尝试使用 Pandoc
+        try:
+            # 创建临时MD文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.md',
+                                            delete=False, encoding='utf-8') as tmp:
+                tmp.write(md_content)
+                tmp_md_path = tmp.name
+
+            # 查找 Pandoc 可执行文件
+            pandoc_cmd = self._find_pandoc_executable()
+            if not pandoc_cmd:
+                raise FileNotFoundError("Pandoc not found")
+
+            # 构建Pandoc命令
+            cmd = [pandoc_cmd, tmp_md_path, '-o', output_path]
+
+            # 如果配置了医学模板，使用模板
+            template_path = system_config.MEDICAL_TEMPLATE
+            if template_path and os.path.exists(template_path):
+                cmd.extend(['--reference-doc', template_path])
+
+            # 执行转换
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+            # 清理临时文件
+            if os.path.exists(tmp_md_path):
+                os.remove(tmp_md_path)
+
+            if result.returncode == 0:
+                return output_path
+            else:
+                print(f"[WARN] Pandoc转换失败: {result.stderr}")
+                # 继续尝试备用方案
+
+        except FileNotFoundError:
+            print("[INFO] Pandoc未安装，尝试使用python-docx...")
+        except subprocess.TimeoutExpired:
+            print("[WARN] Pandoc转换超时，尝试备用方案...")
+        except Exception as e:
+            print(f"[WARN] Pandoc转换失败: {e}，尝试备用方案...")
+
+        # 方法2：使用 python-docx 作为备用
+        return self._convert_md_to_docx_native(md_content, output_path)
+
+    def _find_pandoc_executable(self) -> Optional[str]:
+        """查找Pandoc可执行文件，优先使用项目内的便携版"""
+        import platform
+        import shutil
+        from pathlib import Path
+
+        # 1. 优先检查项目内的便携版 Pandoc
+        project_root = Path(__file__).parent.parent
+        if platform.system() == 'Windows':
+            local_pandoc = project_root / 'tools' / 'pandoc' / 'windows' / 'pandoc.exe'
+        else:
+            local_pandoc = project_root / 'tools' / 'pandoc' / 'linux' / 'pandoc'
+
+        if local_pandoc.exists():
+            return str(local_pandoc)
+
+        # 2. 检查系统PATH中的Pandoc
+        system_pandoc = shutil.which('pandoc')
+        if system_pandoc:
+            return system_pandoc
+
+        return None
+
+    def _convert_md_to_docx_native(self, md_content: str, output_path: str) -> Optional[str]:
+        """
+        使用python-docx直接将Markdown转换为DOCX（不依赖Pandoc）
+        """
+        try:
+            from docx import Document
+            from docx.shared import Pt, Cm
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+        except ImportError:
+            print("[WARN] python-docx未安装，无法导出DOCX格式")
+            return None
+
+        try:
+            doc = Document()
+
+            # 设置页面边距
+            section = doc.sections[0]
+            section.left_margin = Cm(2.5)
+            section.right_margin = Cm(2.5)
+            section.top_margin = Cm(2.5)
+            section.bottom_margin = Cm(2.5)
+
+            # 解析Markdown并转换
+            lines = md_content.split('\n')
+            for line in lines:
+                line = line.rstrip()
+
+                if not line:
+                    continue
+
+                # 处理标题
+                if line.startswith('# '):
+                    p = doc.add_heading(line[2:], level=1)
+                elif line.startswith('## '):
+                    p = doc.add_heading(line[3:], level=2)
+                elif line.startswith('### '):
+                    p = doc.add_heading(line[4:], level=3)
+                elif line.startswith('#### '):
+                    p = doc.add_heading(line[5:], level=4)
+                elif line.startswith('- ') or line.startswith('* '):
+                    # 列表项
+                    p = doc.add_paragraph(line[2:], style='List Bullet')
+                elif line.startswith('1. ') or line.startswith('2. '):
+                    # 编号列表
+                    p = doc.add_paragraph(line[3:], style='List Number')
+                else:
+                    # 普通段落 - 设置首行缩进2字符
+                    p = doc.add_paragraph(line)
+                    p.paragraph_format.first_line_indent = Cm(0.74)
+
+            doc.save(output_path)
+            return output_path
+
+        except Exception as e:
+            print(f"[WARN] python-docx转换失败: {e}")
+            return None
+
     def _save_temp_literature(self) -> str:
         """保存临时文献文件"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
