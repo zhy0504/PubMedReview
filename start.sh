@@ -543,6 +543,7 @@ def parse_requirements():
                 'python-dateutil': 'dateutil',
                 'beautifulsoup4': 'bs4',
                 'python-dotenv': 'dotenv',
+                'python-docx': 'docx',
                 'lxml': 'lxml',
                 'charset-normalizer': 'charset_normalizer',
                 'pytest-cov': 'pytest_cov'
