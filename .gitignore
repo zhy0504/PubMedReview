@@ -236,8 +236,8 @@ _bmad-output/
 cache/
 logs/
 
-# Tools (Pandoc etc.)
-tools/
+# Tools - only ignore Pandoc binaries
+tools/pandoc/
 
 # Virtual environment (already covered but explicit)
 venv/

@@ -228,15 +228,19 @@ class PandocExporter:
         
         # 构建pandoc命令 - 使用动态路径
         cmd = [self.pandoc_path, md_file, '-o', output_file]
-        
-        # 添加样式参数
-        if style == "academic":
-            # 学术风格：更紧凑的行距，标准字体
-            cmd.extend(['--variable', 'fontfamily=Times'])
-        
-        # 使用自定义模板
+
+        # 使用自定义模板（优先级最高）
         if custom_template and os.path.exists(custom_template):
             cmd.extend(['--reference-doc', custom_template])
+        elif style == "academic":
+            # 学术风格：使用医学论文模板
+            project_root = Path(__file__).parent.parent
+            medical_template = project_root / 'tools' / 'medical_template.docx'
+            if medical_template.exists():
+                cmd.extend(['--reference-doc', str(medical_template)])
+            else:
+                # 模板不存在时使用 Times 字体
+                cmd.extend(['--variable', 'fontfamily=Times'])
         
         try:
             # 执行转换

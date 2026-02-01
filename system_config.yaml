@@ -73,7 +73,7 @@ ai:
   # 默认最大token数（null表示不限制）
   default_max_tokens: null
   # 优先使用的模型ID（用于自动选择）
-  preferred_model: "gemini-2.5-pro"
+  preferred_model: "gemini-3.0-pro"
 
 # ----------------------------------------------------------------------------
 # PubMed 配置
@@ -158,3 +158,5 @@ export:
   default_format: "md"
   # DOCX导出样式: academic, simple
   docx_style: "academic"
+  # 医学论文模板路径（用于 Pandoc 转换）
+  medical_template: "tools/medical_template.docx"
