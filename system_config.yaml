@@ -73,7 +73,7 @@ ai:
   # 默认最大token数（null表示不限制）
   default_max_tokens: null
   # 优先使用的模型ID（用于自动选择）
-  preferred_model: "gemini-3.0-pro"
+  preferred_model: "gemini-3-pro"
 
 # ----------------------------------------------------------------------------
 # PubMed 配置

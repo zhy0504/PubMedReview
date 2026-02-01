@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ai_client import AIClient, ConfigManager, ChatMessage
 from prompts_manager import PromptsManager
+from shared_config import system_config
 
 
 class OutlineGeneratorConfig:
@@ -175,7 +176,7 @@ class ReviewOutlineGenerator:
             else:
                 # 如果没有缓存，使用默认配置
                 print("[WARN] 未找到模型配置缓存，使用默认配置")
-                self.model_id = "gemini-2.5-pro"
+                self.model_id = system_config.PREFERRED_MODEL
                 self.model_parameters = {
                     "temperature": 0.1,
                     "stream": True,
@@ -217,10 +218,11 @@ class ReviewOutlineGenerator:
                 print("[FAIL] 端点未返回可用模型")
                 return None
             
-            # 查找 gemini-2.5-pro 模型的索引
+            # 查找优先模型的索引
+            preferred_model = system_config.PREFERRED_MODEL.lower()
             preferred_index = None
             for i, model in enumerate(models):
-                if "gemini-2.5-pro" in model.id.lower():
+                if preferred_model in model.id.lower():
                     preferred_index = i + 1  # 显示的序号是从1开始的
                     break
             

@@ -22,6 +22,7 @@ import yaml
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ai_client import AIClient, ConfigManager, ChatMessage
+from shared_config import system_config
 from prompts_manager import PromptsManager
 
 
@@ -304,7 +305,7 @@ class MedicalReviewGenerator:
                 print(f"使用Gemini模型配置: {self.model_id} (启用流式输出)")
             else:
                 # 如果没有缓存，使用默认的Gemini模型
-                self.model_id = "gemini-2.5-pro"  # 默认使用Gemini 2.5 Pro
+                self.model_id = system_config.PREFERRED_MODEL
                 self.model_parameters['stream'] = True
                 print(f"使用默认Gemini模型: {self.model_id} (启用流式输出)")
         else:

@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from ai_client import AIClient, ConfigManager, ChatMessage
 from prompts_manager import PromptsManager
+from shared_config import system_config
 from dataclasses import dataclass, asdict
 
 
@@ -576,10 +577,11 @@ class IntentAnalyzer:
                 print("[FAIL] 端点未返回可用模型")
                 return None
             
-            # 查找 gemini-2.5-pro 模型的索引
+            # 查找优先模型的索引
+            preferred_model = system_config.PREFERRED_MODEL.lower()
             preferred_index = None
             for i, model in enumerate(models):
-                if "gemini-2.5-pro" in model.id.lower():
+                if preferred_model in model.id.lower():
                     preferred_index = i + 1  # 显示的序号是从1开始的
                     break
             
