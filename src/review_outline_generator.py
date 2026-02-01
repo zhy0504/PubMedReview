@@ -78,21 +78,22 @@ class OutlineCache:
     
     def put(self, abstracts: List[str], research_topic: str, outline: str):
         """存储大纲结果"""
-        if not self.config.enable_caching:
+        # 缓存禁用检查：enable_caching=False 或 cache_size<=0
+        if not self.config.enable_caching or self.config.cache_size <= 0:
             return
-            
+
         abstracts_hash = self._hash_abstracts(abstracts)
         key = self._generate_key(abstracts_hash, research_topic)
-        
+
         with self.lock:
             # 检查缓存大小
-            if len(self.cache) >= self.config.cache_size:
+            if len(self.cache) >= self.config.cache_size and self.access_times:
                 # LRU淘汰
                 oldest_key = min(self.access_times.keys(), key=self.access_times.get)
                 del self.cache[oldest_key]
                 del self.access_times[oldest_key]
                 self.stats['evictions'] += 1
-            
+
             self.cache[key] = outline
             self.access_times[key] = time.time()
     
@@ -870,7 +871,7 @@ def main():
         
         # 生成大纲
         print(f"正在基于文献 '{args.file}' 生成主题为 '{args.topic}' 的综述大纲...")
-        outline = generator.generate_outline_from_json(args.file, args.topic, args.words)
+        outline = generator.generate_outline_from_json(args.file, args.topic)
         
         # 输出结果
         if args.output:
@@ -883,7 +884,7 @@ def main():
             safe_topic = re.sub(r'[^\w\s-]', '', args.topic).replace(' ', '_')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             outline_filename = f"综述大纲—{safe_topic}-{timestamp}.md"
-            output_file = os.path.join("综述大纲", outline_filename)
+            output_file = os.path.join("output", "综述大纲", outline_filename)
             generator.save_outline(outline, output_file)
         
         print("\n生成的大纲:")

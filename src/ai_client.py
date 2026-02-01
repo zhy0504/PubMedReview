@@ -24,20 +24,41 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from urllib.parse import urljoin
 
+# ============ 常量定义 ============
+MAX_BACKOFF_SECONDS = 10  # 最大退避等待时间（秒）
+DEFAULT_CACHE_SIZE = 500  # 默认缓存大小
+DEFAULT_CACHE_TTL = 1800  # 默认缓存TTL（秒）
+MAX_CONNECTIONS = 50  # 最大连接数
+
 # 设置标准输出编码为UTF-8
 if sys.stdout.encoding != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
-    except:
+    except (AttributeError, OSError):
         pass
 
-# Windows控制台编码设置
-if os.name == 'nt':  # Windows
-    try:
-        # 设置控制台代码页为UTF-8
-        os.system('chcp 65001 >nul')
-    except:
-        pass
+# Windows控制台编码设置 - 封装为可选调用函数
+_console_encoding_configured = False
+
+
+def setup_windows_console_encoding():
+    """可选: 设置 Windows 控制台 UTF-8 编码
+
+    注意: 此函数会修改全局控制台编码，建议仅在主程序入口调用
+    """
+    global _console_encoding_configured
+    if _console_encoding_configured:
+        return
+
+    if os.name == 'nt':  # Windows
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleCP(65001)
+            kernel32.SetConsoleOutputCP(65001)
+            _console_encoding_configured = True
+        except (OSError, AttributeError):
+            pass
 
 
 def safe_print(text: str, end: str = '\n', flush: bool = False):
@@ -49,7 +70,7 @@ def safe_print(text: str, end: str = '\n', flush: bool = False):
         try:
             safe_text = text.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
             print(safe_text, end=end, flush=flush)
-        except:
+        except (UnicodeEncodeError, UnicodeDecodeError):
             # 最后的备选方案，只输出ASCII字符
             ascii_text = text.encode('ascii', errors='replace').decode('ascii')
             print(ascii_text, end=end, flush=flush)
@@ -91,14 +112,14 @@ class AICacheManager:
     def cache_response(self, messages: List['ChatMessage'], model_id: str, response: str, parameters: Dict = None):
         """缓存响应"""
         cache_key = self._generate_cache_key(messages, model_id, parameters)
-        
+
         with self.lock:
-            # LRU缓存清理
-            if len(self.cache) >= self.cache_size:
+            # LRU缓存清理 - 使用安全的pop方法避免竞态条件
+            if len(self.cache) >= self.cache_size and self.access_times:
                 oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
-                del self.cache[oldest_key]
-                del self.access_times[oldest_key]
-            
+                self.cache.pop(oldest_key, None)
+                self.access_times.pop(oldest_key, None)
+
             self.cache[cache_key] = {
                 'response': response,
                 'timestamp': time.time(),
@@ -196,19 +217,19 @@ class EnhancedConnectionManager:
                     return response.json()
                 elif response.status_code in [429, 500, 502, 503, 504]:
                     if attempt < max_retries - 1:
-                        wait_time = min(2 ** attempt, 10)  # 指数退避，最多等待10秒
+                        wait_time = min(2 ** attempt, MAX_BACKOFF_SECONDS)  # 指数退避
                         time.sleep(wait_time)
                         continue
                 else:
                     response.raise_for_status()
-                    
+
             except requests.exceptions.RequestException as e:
                 with self.lock:
                     self.request_stats['total_requests'] += 1
                     self.request_stats['failed_requests'] += 1
-                
+
                 if attempt < max_retries - 1:
-                    wait_time = min(2 ** attempt, 10)
+                    wait_time = min(2 ** attempt, MAX_BACKOFF_SECONDS)
                     time.sleep(wait_time)
                     continue
                 else:
@@ -268,28 +289,28 @@ class ChatMessage:
 
 class BaseAIAdapter:
     """AI适配器基类 v2.0"""
-    
+
     def __init__(self, config: AIConfig, enable_cache: bool = True, enable_retry: bool = True):
         self.config = config
         self.enable_cache = enable_cache
         self.enable_retry = enable_retry
-        
+
         # 增强的连接管理
         self.connection_manager = EnhancedConnectionManager(
             max_connections=50,
             timeout=config.timeout
         )
-        
+
         # 智能缓存系统
         self.cache_manager = AICacheManager(cache_size=500, ttl=1800) if enable_cache else None
-        
+
         # 基础会话配置
         self.session = self.connection_manager.get_session()
         self.session.headers.update({
             'Authorization': f'Bearer {config.api_key}',
             'Content-Type': 'application/json'
         })
-        
+
         # 性能统计
         self.performance_stats = {
             'total_calls': 0,
@@ -297,6 +318,29 @@ class BaseAIAdapter:
             'total_tokens': 0,
             'total_latency': 0.0
         }
+
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口 - 确保资源释放"""
+        self.close()
+        return False
+
+    def __del__(self):
+        """析构函数 - 清理资源"""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def close(self):
+        """关闭适配器并释放资源"""
+        if hasattr(self, 'connection_manager') and self.connection_manager:
+            self.connection_manager.close()
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            self.cache_manager.clear_cache()
     
     def _check_cache(self, messages: List[ChatMessage], model_id: str, parameters: Dict = None) -> Optional[str]:
         """检查缓存"""
@@ -437,27 +481,7 @@ class OpenAIAdapter(BaseAIAdapter):
             self._models_cache_time = current_time
             
             return models
-            try:
-                models_data = response.json()
-            except json.JSONDecodeError:
-                return self._get_default_models()
-            
-            models = []
-            
-            for model in models_data.get('data', []):
-                model_info = ModelInfo(
-                    id=model['id'],
-                    name=model.get('name', model['id']),
-                    description=f"Created: {model.get('created', 'Unknown')}",
-                    context_length=model.get('context_length', 4096),
-                    supports_streaming=True
-                )
-                models.append(model_info)
-            
-            # 按名称排序
-            models.sort(key=lambda x: x.name)
-            return models  # 直接返回实际获取到的模型列表
-            
+
         except Exception as e:
             print(f"获取OpenAI模型列表失败: {e}")
             return []  # 返回空列表而不是默认模型
@@ -1085,136 +1109,110 @@ class GeminiAdapter(BaseAIAdapter):
 
 
 class ConfigManager:
-    """配置管理器 - 支持新的多服务配置格式"""
-    
+    """配置管理器 - 从环境变量(.env)加载配置"""
+
     _services_displayed = False  # 全局标志，防止重复显示服务列表
-    
-    def __init__(self, config_file: str = "ai_config.yaml"):
-        self.config_file = config_file
+
+    def __init__(self, config_file: str = None):
+        """
+        初始化配置管理器
+
+        注意: config_file 参数已废弃，配置现在从环境变量加载
+        """
+        # 导入新的配置模块
+        from ai_config import get_ai_config
+
+        self._ai_config = get_ai_config()
         self.configs = {}
         self.default_service = None
         self.settings = {}
         self.load_config()
-        
+
         # 只在主线程中第一次初始化时显示服务列表
         if not ConfigManager._services_displayed and threading.current_thread() is threading.main_thread():
             self._show_loaded_services()
             ConfigManager._services_displayed = True
-    
+
     def load_config(self):
-        """加载配置文件 - 支持新格式和兼容旧格式"""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f) or {}
-                
-                # 检查是否为新的多服务配置格式
-                if 'ai_services' in data:
-                    # 新格式：多服务配置
-                    self._load_multi_service_config(data)
-                else:
-                    # 兼容旧格式：直接服务配置
-                    self._load_legacy_config(data)
-                    
-            except Exception as e:
-                print(f"加载配置文件失败: {e}")
-    
-    def _load_multi_service_config(self, data):
-        """加载新的多服务配置格式"""
-        services = data.get('ai_services', {})
-        self.default_service = data.get('default_service', 'ai_wave')
-        self.settings = data.get('settings', {
+        """从环境变量加载配置"""
+        # 转换新格式配置到旧格式
+        for service in self._ai_config.list_valid_services():
+            config = AIConfig(
+                name=service.name,
+                api_type=service.api_type,
+                base_url=service.base_url,
+                api_key=service.api_key,
+                default_model=service.model,
+                timeout=service.timeout
+            )
+            self.configs[service.name] = config
+
+        # 设置默认服务
+        active = self._ai_config.get_active_service()
+        if active:
+            self.default_service = active.name
+        elif self.configs:
+            self.default_service = next(iter(self.configs.keys()))
+
+        # 加载设置
+        self.settings = {
             'auto_retry': True,
-            'max_retries': 3,
+            'max_retries': self._ai_config.get_setting('max_retries', 3),
             'show_service_status': True,
-            'allow_service_switch': True
-        })
-        
-        # 加载所有服务配置
-        for service_id, service_data in services.items():
-            try:
-                # 只加载状态为active或testing的服务
-                status = service_data.get('status', 'inactive')
-                if status in ['active', 'testing']:
-                    # 创建AIConfig对象，使用service_id作为name
-                    config = AIConfig(
-                        name=service_data.get('name', service_id),
-                        api_type=service_data.get('api_type', 'openai'),
-                        base_url=service_data.get('base_url', ''),
-                        api_key=service_data.get('api_key', ''),
-                        default_model=service_data.get('default_model', ''),
-                        timeout=service_data.get('timeout', 60)
-                    )
-                    self.configs[service_id] = config
-                    
-                    # 如果是默认服务或第一个激活的服务，设置为当前默认
-                    if service_id == self.default_service or not hasattr(self, '_default_set'):
-                        self.default_service = service_id
-                        self._default_set = True
-                        
-            except Exception as e:
-                print(f"加载服务配置 '{service_id}' 失败: {e}")
-        
-        # 已在__init__中统一显示服务状态，此处移除重复显示
-        pass
-    
-    def _load_legacy_config(self, data):
-        """加载旧格式配置（向后兼容）"""
-        print("检测到旧格式配置文件，建议升级到新的多服务格式")
-        
-        for name, config_data in data.items():
-            try:
-                self.configs[name] = AIConfig(**config_data)
-                if not self.default_service:
-                    self.default_service = name
-            except Exception as e:
-                print(f"加载配置 '{name}' 失败: {e}")
-    
+            'allow_service_switch': self._ai_config.get_setting('allow_service_switch', True)
+        }
+
     def _show_loaded_services(self):
         """显示已加载的服务状态"""
+        if not self.configs:
+            print("\n[WARN] 未找到有效的AI服务配置")
+            print("       请检查 .env 文件或环境变量配置")
+            return
+
         print("\n[OK] 已加载的AI服务:")
         for service_id, config in self.configs.items():
             status_indicator = "[TARGET]" if service_id == self.default_service else "[ ]"
             print(f"  {status_indicator} {config.name} ({config.api_type}) - {config.base_url}")
-        
+
         if self.default_service:
             default_config = self.configs.get(self.default_service)
             if default_config:
                 print(f"\n[TARGET] 默认服务: {default_config.name}")
-    
+
     def get_default_config(self) -> Optional[AIConfig]:
         """获取默认配置"""
         if self.default_service and self.default_service in self.configs:
             return self.configs[self.default_service]
-        
+
         # 如果没有默认配置，返回第一个可用配置
         if self.configs:
             return next(iter(self.configs.values()))
-        
+
         return None
-    
+
     def get_active_configs(self) -> Dict[str, AIConfig]:
         """获取所有激活的配置"""
         return self.configs.copy()
-    
+
     def switch_default_service(self, service_id: str) -> bool:
         """切换默认服务"""
         if service_id in self.configs:
             self.default_service = service_id
+            self._ai_config.set_active_service(service_id)
             print(f"默认服务已切换到: {self.configs[service_id].name}")
             return True
         else:
             print(f"服务 '{service_id}' 不存在或未激活")
             return False
-    
+
     def auto_retry_enabled(self) -> bool:
         """检查是否启用自动重试"""
         return self.settings.get('auto_retry', True)
-    
+
     def get_max_retries(self) -> int:
         """获取最大重试次数"""
         return self.settings.get('max_retries', 3)
-    
+
     def get_fallback_configs(self) -> List[AIConfig]:
         """获取备用配置列表（除了当前默认服务外的其他服务）"""
         fallback_configs = []
@@ -1222,29 +1220,19 @@ class ConfigManager:
             if service_id != self.default_service:
                 fallback_configs.append(config)
         return fallback_configs
-    
+
     def save_config(self):
-        """保存配置文件"""
-        try:
-            data = {name: asdict(config) for name, config in self.configs.items()}
-            
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
-                
-            print(f"配置已保存到 {self.config_file}")
-            
-        except Exception as e:
-            print(f"保存配置失败: {e}")
-    
+        """保存配置 - 已废弃，配置通过环境变量管理"""
+        print("[INFO] 配置现在通过环境变量(.env)管理，无需保存文件")
+
     def add_config(self, config: AIConfig):
-        """添加配置"""
+        """添加配置到内存"""
         self.configs[config.name] = config
-        self.save_config()
-    
+
     def get_config(self, name: str) -> Optional[AIConfig]:
         """获取配置"""
         return self.configs.get(name)
-    
+
     def list_configs(self) -> List[str]:
         """列出所有配置名称"""
         return list(self.configs.keys())
@@ -1786,19 +1774,21 @@ class AIClient:
 
 def main():
     """主程序入口"""
+    # 在主程序入口设置控制台编码
+    setup_windows_console_encoding()
+
     parser = argparse.ArgumentParser(description='AI接口交互程序')
-    parser.add_argument('--config', help='配置文件路径', default='ai_config.yaml')
-    
+    parser.add_argument('--config', help='配置文件路径(已废弃，配置从环境变量加载)', default=None)
+
     args = parser.parse_args()
-    
+
+    if args.config:
+        print("[INFO] --config 参数已废弃，配置现在从环境变量(.env)加载")
+
     try:
-        # 设置配置文件路径
-        if args.config != 'ai_config.yaml':
-            ConfigManager.config_file = args.config
-        
         client = AIClient()
         client.run()
-        
+
     except KeyboardInterrupt:
         print("\n\n程序被用户中断")
         sys.exit(0)

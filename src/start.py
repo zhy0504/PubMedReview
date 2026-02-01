@@ -23,7 +23,7 @@ if platform.system() == "Windows":
     try:
         import os
         os.system("chcp 65001 > nul")  # 设置控制台为UTF-8编码
-    except:
+    except OSError:
         pass
 
 # 添加项目根目录到Python路径
@@ -848,7 +848,7 @@ def show_help():
 
 1. 首次使用
    - 运行 'python src/start.py' 系统会自动检测并修复问题
-   - 编辑 ai_config.yaml 添加您的API密钥
+   - 编辑 .env 文件添加您的API密钥
    - 运行系统状态检查确认环境
 
 2. 日常使用
@@ -865,7 +865,7 @@ def show_help():
    - python src/start.py --force-check # 强制重新检查（忽略缓存）
 
 4. 配置文件
-   - ai_config.yaml: AI服务配置
+   - .env: AI服务配置（API密钥、URL、模型）
    - prompts_config.yaml: 提示词配置
    - requirements.txt: 依赖包列表
 
@@ -875,7 +875,7 @@ def show_help():
 
 6. 故障排除
    - 运行环境检查诊断问题
-   - 检查ai_config.yaml中的API密钥
+   - 检查 .env 中的API密钥配置
    - 确保有足够的系统内存和磁盘空间
 """
     print(help_text)
@@ -903,8 +903,8 @@ def auto_fix_environment():
             auto_fixed.append("虚拟环境已创建")
     except EnvironmentError as e:
         print_status(f"虚拟环境自动创建失败:", "ERROR")
-        print_status(f"错误类型: {e.category}", "ERROR")
-        print_status(f"错误状态: {e.status}", "ERROR") 
+        print_status(f"错误组件: {e.component}", "ERROR")
+        print_status(f"错误类型: {e.error_type}", "ERROR")
         print_status(f"错误信息: {e.message}", "ERROR")
         if e.solution:
             print_status(f"建议解决方案: {e.solution}", "INFO")
@@ -976,7 +976,7 @@ def main():
     
     try:
         args = parser.parse_args()
-    except:
+    except SystemExit:
         args = argparse.Namespace(command=None, check_only=False, force_check=False, help=False)
     
     # 打印启动横幅（如果没有被PowerShell脚本禁用）

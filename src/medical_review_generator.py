@@ -12,12 +12,12 @@ import os
 import re
 import subprocess
 import shutil
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import yaml
-import sys
-import os
+
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -257,7 +257,7 @@ class PandocExporter:
 class MedicalReviewGenerator:
     """医学综述文章生成器 - 简化版本"""
     
-    def __init__(self, config_name: str = None, output_dir: str = "综述文章"):
+    def __init__(self, config_name: str = None, output_dir: str = "output/综述文章"):
         """
         初始化综述生成器
         

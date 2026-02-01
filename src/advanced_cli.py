@@ -38,7 +38,7 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
+            except (json.JSONDecodeError, IOError, OSError):
                 return []
         return []
     
@@ -132,7 +132,7 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         # AI配置
         ai_config = self.check_ai_config()
         print(f"\nAI配置:")
-        print(f"  文件: {ai_config['config_file']}")
+        print(f"  文件: {ai_config['env_file']}")
         if ai_config['file_exists']:
             print(f"  有效服务: {ai_config['valid_services']}")
             print(f"  默认服务: {ai_config['default_service'] or '未设置'}")
@@ -153,8 +153,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         print(f"\n目录结构:")
         print(f"  数据目录: {'存在' if self.data_dir.exists() else '不存在'}")
         # 检查各种输出目录
-        review_dir = self.project_root / "综述文章"
-        outline_dir = self.project_root / "综述大纲"
+        output_dir = self.project_root / "output"
+        review_dir = output_dir / "综述文章"
+        outline_dir = output_dir / "综述大纲"
         print(f"  综述文章目录: {'存在' if review_dir.exists() else '不存在'}")
         print(f"  综述大纲目录: {'存在' if outline_dir.exists() else '不存在'}")
         print(f"  提示词目录: {'存在' if (self.project_root / 'prompts').exists() else '不存在'}")
@@ -391,7 +392,7 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             print("=" * 60)
             
             ai_config = self.check_ai_config()
-            print(f"配置文件: {ai_config['config_file']}")
+            print(f"配置文件: {ai_config['env_file']}")
             print(f"有效服务: {ai_config['valid_services']}")
             print(f"默认服务: {ai_config['default_service'] or '未设置'}")
             
@@ -585,18 +586,34 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             print("请输入有效数字")
     
     def _update_default_service_in_config(self, service_name: str) -> bool:
-        """更新配置文件中的默认服务"""
+        """更新配置中的默认服务（修改.env文件）"""
         try:
-            import yaml
-            
-            with open(self.ai_config_file, 'r', encoding='utf-8') as f:
-                config_data = yaml.safe_load(f)
-            
-            config_data['default_service'] = service_name
-            
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True, indent=2)
-            
+            env_file = self.project_root / ".env"
+
+            if not env_file.exists():
+                print("配置文件(.env)不存在")
+                return False
+
+            # 读取现有内容
+            with open(env_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            # 查找并更新 DEFAULT_AI_SERVICE
+            updated = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith("DEFAULT_AI_SERVICE="):
+                    lines[i] = f"DEFAULT_AI_SERVICE={service_name}\n"
+                    updated = True
+                    break
+
+            # 如果没找到，添加新行
+            if not updated:
+                lines.append(f"\nDEFAULT_AI_SERVICE={service_name}\n")
+
+            # 写回文件
+            with open(env_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+
             return True
         except Exception as e:
             print(f"更新配置文件失败: {e}")
@@ -731,8 +748,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             print("=" * 60)
             
             print(f"数据目录: {self.data_dir}")
-            review_dir = self.project_root / "综述文章"
-            outline_dir = self.project_root / "综述大纲"
+            output_dir = self.project_root / "output"
+            review_dir = output_dir / "综述文章"
+            outline_dir = output_dir / "综述大纲"
             print(f"综述文章目录: {review_dir}")
             print(f"综述大纲目录: {outline_dir}")
             
@@ -777,7 +795,7 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         try:
             total_size = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
             return self.format_size(total_size)
-        except:
+        except (OSError, PermissionError):
             return "无法计算"
     
     def format_size(self, size: int) -> str:
@@ -837,8 +855,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             shutil.copytree(self.data_dir, backup_path / "data")
             
             # 备份输出目录（如果存在）
-            review_dir = self.project_root / "综述文章"
-            outline_dir = self.project_root / "综述大纲"
+            output_dir = self.project_root / "output"
+            review_dir = output_dir / "综述文章"
+            outline_dir = output_dir / "综述大纲"
             if review_dir.exists():
                 shutil.copytree(review_dir, backup_path / "综述文章")
             if outline_dir.exists():
@@ -846,7 +865,7 @@ class AdvancedCLI(IntelligentLiteratureCLI):
             
             # 备份配置文件
             if self.ai_config_file.exists():
-                shutil.copy2(self.ai_config_file, backup_path / "ai_config.yaml")
+                shutil.copy2(self.ai_config_file, backup_path / ".env")
             if self.prompts_config_file.exists():
                 shutil.copy2(self.prompts_config_file, backup_path / "prompts_config.yaml")
             
@@ -895,22 +914,29 @@ class AdvancedCLI(IntelligentLiteratureCLI):
                 shutil.copytree(backup_path / "data", self.data_dir)
             
             # 恢复输出目录
-            review_dir = self.project_root / "综述文章"
-            outline_dir = self.project_root / "综述大纲"
-            
+            output_dir = self.project_root / "output"
+            review_dir = output_dir / "综述文章"
+            outline_dir = output_dir / "综述大纲"
+
             if (backup_path / "综述文章").exists():
+                output_dir.mkdir(exist_ok=True)
                 if review_dir.exists():
                     shutil.rmtree(review_dir)
                 shutil.copytree(backup_path / "综述文章", review_dir)
-                
+
             if (backup_path / "综述大纲").exists():
+                output_dir.mkdir(exist_ok=True)
                 if outline_dir.exists():
                     shutil.rmtree(outline_dir)
                 shutil.copytree(backup_path / "综述大纲", outline_dir)
             
-            # 恢复配置文件
-            if (backup_path / "ai_config.yaml").exists():
-                shutil.copy2(backup_path / "ai_config.yaml", self.ai_config_file)
+            # 恢复配置文件（兼容旧备份和新备份）
+            if (backup_path / ".env").exists():
+                shutil.copy2(backup_path / ".env", self.ai_config_file)
+            elif (backup_path / "ai_config.yaml").exists():
+                # 旧格式备份，提示用户手动迁移
+                print("[提示] 检测到旧格式配置备份(ai_config.yaml)")
+                print("       请手动将配置迁移到 .env 文件")
             if (backup_path / "prompts_config.yaml").exists():
                 shutil.copy2(backup_path / "prompts_config.yaml", self.prompts_config_file)
             
@@ -1098,8 +1124,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         print(f"AI配置: {'✓' if ai_ok else '✗'} {ai_config['valid_services']} 个有效服务")
         
         # 检查目录结构
-        review_dir = self.project_root / "综述文章"
-        outline_dir = self.project_root / "综述大纲"
+        output_dir = self.project_root / "output"
+        review_dir = output_dir / "综述文章"
+        outline_dir = output_dir / "综述大纲"
         dirs_ok = all([
             self.data_dir.exists(),
             (self.project_root / 'prompts').exists()
@@ -1217,8 +1244,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
                 # 目录信息
                 f.write("目录信息:\n")
                 f.write(f"  数据目录: {self.data_dir}\n")
-                review_dir = self.project_root / "综述文章"
-                outline_dir = self.project_root / "综述大纲"
+                output_dir = self.project_root / "output"
+                review_dir = output_dir / "综述文章"
+                outline_dir = output_dir / "综述大纲"
                 f.write(f"  综述文章目录: {review_dir}\n")
                 f.write(f"  综述大纲目录: {outline_dir}\n")
                 f.write(f"  数据大小: {self.get_dir_size(self.data_dir)}\n")

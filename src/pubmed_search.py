@@ -65,9 +65,13 @@ class SearchResultCache:
     
     def get(self, query: str, max_results: int, sort_by: str) -> Optional[List[str]]:
         """获取缓存的PMID列表"""
+        # 如果缓存大小为0，表示禁用缓存，直接返回None
+        if self.max_size <= 0:
+            return None
+
         cache_key = self._generate_cache_key(query, max_results, sort_by)
         cache_file = self._get_cache_file_path(cache_key)
-        
+
         with self.lock:
             if os.path.exists(cache_file):
                 try:
@@ -85,19 +89,23 @@ class SearchResultCache:
                     # 缓存文件损坏，删除
                     if os.path.exists(cache_file):
                         os.remove(cache_file)
-        
+
         self.stats['misses'] += 1
         return None
     
     def put(self, query: str, max_results: int, sort_by: str, pmids: List[str]):
         """缓存PMID列表"""
+        # 如果缓存大小为0，表示禁用缓存
+        if self.max_size <= 0:
+            return
+
         cache_key = self._generate_cache_key(query, max_results, sort_by)
         cache_file = self._get_cache_file_path(cache_key)
-        
+
         with self.lock:
             # LRU缓存清理
             cache_files = [f for f in os.listdir(self.cache_dir) if f.endswith('.json')]
-            if len(cache_files) >= self.max_size:
+            if len(cache_files) >= self.max_size and cache_files:
                 # 删除最老的缓存文件
                 cache_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.cache_dir, f)))
                 oldest_file = cache_files[0]
@@ -404,16 +412,33 @@ class PubMedSearcher:
         # 动态批处理
         batch_size = self._calculate_optimal_batch_size(len(pmids))
         all_articles = []
-        
-        # 创建异步任务
-        tasks = []
-        for i in range(0, len(pmids), batch_size):
-            batch_pmids = pmids[i:i + batch_size]
-            task = self._fetch_batch_async(batch_pmids)
-            tasks.append(task)
-        
-        # 并发执行
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 创建异步任务，使用信号量限制并发
+        # 边界保护：max_concurrent <= 0 时使用 1（串行执行）
+        max_concurrent = max(1, self.config.max_concurrent)
+        semaphore = asyncio.Semaphore(max_concurrent)
+        request_delay = self.config.request_delay
+
+        async def fetch_with_semaphore(batch_pmids):
+            async with semaphore:
+                return await self._fetch_batch_async(batch_pmids)
+
+        # 按组生成并立即执行，降低内存峰值占用
+        results = []
+        batch_starts = list(range(0, len(pmids), batch_size))
+        for group_start in range(0, len(batch_starts), max_concurrent):
+            group_indices = batch_starts[group_start:group_start + max_concurrent]
+            # 按需生成当前组的任务
+            group_tasks = [
+                fetch_with_semaphore(pmids[idx:idx + batch_size])
+                for idx in group_indices
+            ]
+            # 立即执行当前组
+            group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
+            results.extend(group_results)
+            # 组间添加延迟
+            if group_start + max_concurrent < len(batch_starts):
+                await asyncio.sleep(request_delay)
         
         # 处理结果
         for i, result in enumerate(results):
@@ -848,35 +873,35 @@ class PubMedSearcher:
     def _extract_complete_abstract(self, article_element) -> str:
         """
         提取完整摘要，支持多段落和结构化摘要
-        
+
         Args:
             article_element: XML文章元素
-        
+
         Returns:
             完整的摘要文本
         """
         try:
             abstract_parts = []
-            
+
             # 查找所有AbstractText元素
             abstract_texts = article_element.findall('.//AbstractText')
-            
+
             if abstract_texts:
                 for abstract_elem in abstract_texts:
                     # 获取标签（如Background, Methods, Results等）
                     label = abstract_elem.get('Label')
                     text = abstract_elem.text or ""
-                    
+
                     if text.strip():
                         if label:
                             abstract_parts.append(f"{label}: {text.strip()}")
                         else:
                             abstract_parts.append(text.strip())
-                
+
                 # 合并所有段落
                 if abstract_parts:
                     return " ".join(abstract_parts)
-            
+
             # 备用方案：查找Abstract元素
             abstract_elem = article_element.find('.//Abstract')
             if abstract_elem is not None:
@@ -884,16 +909,64 @@ class PubMedSearcher:
                 abstract_text = "".join(abstract_elem.itertext()).strip()
                 if abstract_text:
                     return abstract_text
-                    
+
             return ""
-            
+
         except Exception as e:
             # 备用方案：使用简单方式提取
             try:
                 abstract_elem = article_element.find('.//AbstractText')
                 return abstract_elem.text if abstract_elem is not None else ""
-            except:
+            except (AttributeError, TypeError):
                 return ""
+
+    def get_performance_report(self) -> Dict:
+        """获取性能报告"""
+        return {
+            'total_searches': self.performance_stats['total_searches'],
+            'cache_hits': self.performance_stats['cache_hits'],
+            'cache_hit_rate': self.performance_stats['cache_hits'] / max(self.performance_stats['total_searches'], 1),
+            'api_calls': self.performance_stats['api_calls'],
+            'retries': self.performance_stats['retries'],
+            'errors': self.performance_stats['errors'],
+            'total_latency': self.performance_stats['total_latency'],
+            'average_latency': self.performance_stats['total_latency'] / max(self.performance_stats['total_searches'], 1),
+            'parse_time': self.performance_stats['parse_time'],
+            'articles_parsed': self.performance_stats['articles_parsed'],
+            'average_parse_time': self.performance_stats['parse_time'] / max(self.performance_stats['articles_parsed'], 1) if self.performance_stats['articles_parsed'] > 0 else 0
+        }
+
+    def print_performance_report(self):
+        """打印性能报告"""
+        report = self.get_performance_report()
+        print("\n=== PubMed检索器性能报告 ===")
+        print(f"总搜索次数: {report['total_searches']}")
+        print(f"缓存命中率: {report['cache_hit_rate']:.2%}")
+        print(f"API调用次数: {report['api_calls']}")
+        print(f"重试次数: {report['retries']}")
+        print(f"错误次数: {report['errors']}")
+        print(f"平均延迟: {report['average_latency']:.2f}秒")
+        print(f"平均解析时间: {report['average_parse_time']:.4f}秒")
+        print(f"解析文章总数: {report['articles_parsed']}")
+        print("=" * 30)
+
+    def cleanup(self):
+        """清理资源"""
+        try:
+            # 清理会话
+            if hasattr(self, 'session'):
+                self.session.close()
+
+            # 清理缓存
+            if hasattr(self, 'cache') and self.cache:
+                self.cache.clear()
+
+            # 打印性能报告
+            if self.performance_stats['total_searches'] > 0:
+                self.print_performance_report()
+
+        except Exception as e:
+            print(f"清理资源时出错: {e}")
 
 
 class DataExporter:
@@ -1064,8 +1137,15 @@ def main():
     
     args = parser.parse_args()
     
+    # 创建搜索配置
+    config = SearchConfig(
+        email=args.email,
+        max_results=args.max_results,
+        sort_by=args.sort
+    )
+
     # 创建搜索器
-    searcher = PubMedSearcher(email=args.email)
+    searcher = PubMedSearcher(config=config)
     
     # 搜索文章
     pmids = searcher.search_articles(
@@ -1115,55 +1195,6 @@ def main():
     else:
         print("导出失败")
         sys.exit(1)
-
-
-    def get_performance_report(self) -> Dict:
-        """获取性能报告"""
-        return {
-            'total_searches': self.performance_stats['total_searches'],
-            'cache_hits': self.performance_stats['cache_hits'],
-            'cache_hit_rate': self.performance_stats['cache_hits'] / max(self.performance_stats['total_searches'], 1),
-            'api_calls': self.performance_stats['api_calls'],
-            'retries': self.performance_stats['retries'],
-            'errors': self.performance_stats['errors'],
-            'total_latency': self.performance_stats['total_latency'],
-            'average_latency': self.performance_stats['total_latency'] / max(self.performance_stats['total_searches'], 1),
-            'parse_time': self.performance_stats['parse_time'],
-            'articles_parsed': self.performance_stats['articles_parsed'],
-            'average_parse_time': self.performance_stats['parse_time'] / max(self.performance_stats['articles_parsed'], 1) if self.performance_stats['articles_parsed'] > 0 else 0
-        }
-    
-    def print_performance_report(self):
-        """打印性能报告"""
-        report = self.get_performance_report()
-        print("\n=== PubMed检索器性能报告 ===")
-        print(f"总搜索次数: {report['total_searches']}")
-        print(f"缓存命中率: {report['cache_hit_rate']:.2%}")
-        print(f"API调用次数: {report['api_calls']}")
-        print(f"重试次数: {report['retries']}")
-        print(f"错误次数: {report['errors']}")
-        print(f"平均延迟: {report['average_latency']:.2f}秒")
-        print(f"平均解析时间: {report['average_parse_time']:.4f}秒")
-        print(f"解析文章总数: {report['articles_parsed']}")
-        print("=" * 30)
-    
-    def cleanup(self):
-        """清理资源"""
-        try:
-            # 清理会话
-            if hasattr(self, 'session'):
-                self.session.close()
-            
-            # 清理缓存
-            if hasattr(self, 'cache'):
-                self.cache.cleanup()
-            
-            # 打印性能报告
-            if self.performance_stats['total_searches'] > 0:
-                self.print_performance_report()
-                
-        except Exception as e:
-            print(f"清理资源时出错: {e}")
 
 
 if __name__ == "__main__":

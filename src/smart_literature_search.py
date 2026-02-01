@@ -199,7 +199,7 @@ class SmartLiteratureSearchSystem:
         output_file = self._generate_filename(user_input)
         
         # 生成带文件夹路径的输出文件名
-        literature_output_path = os.path.join("文献检索结果", output_file)
+        literature_output_path = os.path.join("output", "文献检索结果", output_file)
         
         # 同时导出JSON和CSV两种格式
         json_path = self.literature_filter.export_filtered_results(
@@ -247,7 +247,7 @@ class SmartLiteratureSearchSystem:
             safe_topic = re.sub(r'[^\w\s-]', '', research_topic).replace(' ', '_')[:20]
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             outline_filename = f"综述大纲—{safe_topic}-{timestamp}.md"
-            outline_file = os.path.join("综述大纲", outline_filename)
+            outline_file = os.path.join("output", "综述大纲", outline_filename)
             
             # 保存大纲
             self.outline_generator.save_outline(outline, outline_file)

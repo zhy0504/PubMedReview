@@ -1288,8 +1288,8 @@ class IntelligentLiteratureSystem:
                         if review_content:
                             success = True
                             # 确保输出目录存在
-                            os.makedirs("综述文章", exist_ok=True)
-                            full_path = os.path.join("综述文章", output_file)
+                            os.makedirs(os.path.join("output", "综述文章"), exist_ok=True)
+                            full_path = os.path.join("output", "综述文章", output_file)
                             
                             # 保存生成的内容
                             with open(full_path, 'w', encoding='utf-8') as f:
@@ -1307,7 +1307,7 @@ class IntelligentLiteratureSystem:
             
             if success:
                 # 确保综述文章文件存在
-                full_path = os.path.join("综述文章", output_file)
+                full_path = os.path.join("output", "综述文章", output_file)
                 if os.path.exists(full_path):
                     print(f"综述文章生成完成: {full_path}")
                 else:
@@ -1355,9 +1355,7 @@ class IntelligentLiteratureSystem:
         self._print_performance_summary(performance_report)
         
         return result
-        
-        return result
-    
+
     def _save_temp_outline(self) -> str:
         """保存临时大纲文件"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1385,7 +1383,7 @@ class IntelligentLiteratureSystem:
             from datetime import datetime
             
             # 创建综述大纲目录
-            outline_dir = "综述大纲"
+            outline_dir = os.path.join("output", "综述大纲")
             os.makedirs(outline_dir, exist_ok=True)
             
             # 清理用户输入内容用于文件名
@@ -1455,7 +1453,7 @@ class IntelligentLiteratureSystem:
             return
             
         # 确保输出目录存在
-        output_dir = "文献检索结果"
+        output_dir = os.path.join("output", "文献检索结果")
         os.makedirs(output_dir, exist_ok=True)
         
         # 生成文件名：文献列表-用户输入内容-时间戳
@@ -2100,67 +2098,6 @@ async def main_async():
         print(f"\n系统运行出现异常: {e}")
         if args.debug:
             traceback.print_exc()
-        sys.exit(1)
-    
-    args = parser.parse_args()
-    
-    try:
-        # 初始化系统
-        system = IntelligentLiteratureSystem(
-            ai_config_name=args.ai_config,
-            interactive_mode=not args.non_interactive_ai
-        )
-        
-        # 初始化组件
-        if not await system.initialize_components():
-            sys.exit(1)
-        
-        # 获取用户查询
-        while True:  # 添加循环支持重新输入
-            if args.query:
-                user_query = args.query
-                args.query = None  # 清除命令行参数，避免重复使用
-            else:
-                # 交互式输入
-                print("请输入您的检索需求（例如：糖尿病治疗近5年高影响因子研究）:")
-                user_query = input(">>> ").strip()
-                
-                if not user_query:
-                    print("[FAIL] 请提供有效的检索需求")
-                    continue
-            
-            # 运行完整工作流程
-            result = system.run_complete_workflow(
-                user_query=user_query,
-                max_results=args.max_results,
-                target_articles=args.target
-            )
-            
-            # 检查是否需要重新输入
-            if result.get("restart"):
-                print("\n" + "="*50)
-                continue  # 重新开始循环
-            elif result["success"]:
-                print("\n[TARGET] 系统运行成功完成！")
-                sys.exit(0)
-            else:
-                print(f"\n[FAIL] 系统运行失败: {result.get('error', '未知错误')}")
-                
-                # 询问是否重试
-                if not args.non_interactive_ai:
-                    try:
-                        retry = input("是否重新输入检索需求？(y/n) [y]: ").strip().lower()
-                        if retry in ['', 'y', 'yes']:
-                            continue
-                    except (EOFError, KeyboardInterrupt):
-                        pass
-                sys.exit(1)
-            
-    except KeyboardInterrupt:
-        print("\n\n[WARN]  用户中断操作")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n[FAIL] 系统运行出现异常: {e}")
         sys.exit(1)
 
 

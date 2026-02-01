@@ -544,7 +544,8 @@ def parse_requirements():
                 'beautifulsoup4': 'bs4',
                 'python-dotenv': 'dotenv',
                 'lxml': 'lxml',
-                'charset-normalizer': 'charset_normalizer'
+                'charset-normalizer': 'charset_normalizer',
+                'pytest-cov': 'pytest_cov'
             }
             
             import_name = import_mapping.get(package_name, package_name.lower())
@@ -600,7 +601,7 @@ if missing:
     exit(1)
 else:
     print(f'+ All dependencies checked ({total_packages}/{total_packages})')
-    key_packages = ['requests', 'pandas', 'numpy', 'PyYAML']
+    key_packages = ['requests', 'pandas', 'numpy', 'PyYAML', 'python-dotenv']
     for pkg in key_packages:
         if pkg in version_info:
             print(f'  + {pkg}: {version_info[pkg]}')

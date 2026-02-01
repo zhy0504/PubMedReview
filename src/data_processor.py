@@ -56,9 +56,13 @@ class DataCache:
     
     def put(self, key: str, value: Any):
         """存储缓存数据"""
+        # 如果缓存大小为0，表示禁用缓存
+        if self.config.cache_size <= 0:
+            return
+
         with self.lock:
             # 检查缓存大小
-            if len(self.cache) >= self.config.cache_size:
+            if len(self.cache) >= self.config.cache_size and self.access_times:
                 # LRU淘汰
                 oldest_key = min(self.access_times.keys(), key=self.access_times.get)
                 del self.cache[oldest_key]

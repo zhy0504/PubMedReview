@@ -7,8 +7,8 @@
 
 import pandas as pd
 import json
+import gzip  # 替换pickle为更安全的json+gzip
 import os
-import pickle  # 添加pickle用于缓存
 from typing import List, Dict, Optional, Tuple
 from intent_analyzer import SearchCriteria
 import re
@@ -18,6 +18,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import hashlib
 from datetime import datetime, timedelta
+
+
+# 常量定义 - 避免魔法数字
+CACHE_EXPIRY_DAYS = 90  # 缓存过期天数
+MAX_YEAR_OFFSET = 5  # 年份验证的未来偏移量
 
 
 class FilterConfig:
@@ -71,20 +76,21 @@ class JournalInfoCache:
     
     def put(self, issn: str, eissn: str, info: Dict):
         """存储期刊信息"""
-        if not self.config.enable_caching:
+        # 缓存禁用检查：enable_caching=False 或 cache_size<=0
+        if not self.config.enable_caching or self.config.cache_size <= 0:
             return
-            
+
         key = self._generate_key(issn, eissn)
-        
+
         with self.lock:
             # 检查缓存大小
-            if len(self.cache) >= self.config.cache_size:
+            if len(self.cache) >= self.config.cache_size and self.access_times:
                 # LRU淘汰
                 oldest_key = min(self.access_times.keys(), key=self.access_times.get)
                 del self.cache[oldest_key]
                 del self.access_times[oldest_key]
                 self.stats['evictions'] += 1
-            
+
             self.cache[key] = info
             self.access_times[key] = time.time()
     
@@ -179,7 +185,9 @@ class LiteratureFilter:
             return pd.DataFrame()
     
     def _load_zky_data(self) -> pd.DataFrame:
-        """兼容性方法"""
+        """兼容性方法 - 已废弃，请使用 _load_zky_data_optimized"""
+        import warnings
+        warnings.warn("_load_zky_data 已废弃，请使用 _load_zky_data_optimized", DeprecationWarning, stacklevel=2)
         return self._load_zky_data_optimized()
     
     def _load_jcr_data_optimized(self) -> pd.DataFrame:
@@ -214,7 +222,9 @@ class LiteratureFilter:
             return pd.DataFrame()
     
     def _load_jcr_data(self) -> pd.DataFrame:
-        """兼容性方法"""
+        """兼容性方法 - 已废弃，请使用 _load_jcr_data_optimized"""
+        import warnings
+        warnings.warn("_load_jcr_data 已废弃，请使用 _load_jcr_data_optimized", DeprecationWarning, stacklevel=2)
         return self._load_jcr_data_optimized()
     
     def _clean_journal_data(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -423,82 +433,89 @@ class LiteratureFilter:
         return mapping
     
     def _build_journal_mapping(self) -> Dict[str, Dict]:
-        """兼容性方法"""
+        """兼容性方法 - 已废弃，请使用 _build_journal_mapping_optimized"""
+        import warnings
+        warnings.warn("_build_journal_mapping 已废弃，请使用 _build_journal_mapping_optimized", DeprecationWarning, stacklevel=2)
         return self._build_journal_mapping_optimized()
     
     def _get_mapping_cache_path(self) -> str:
         """获取期刊映射表缓存文件路径"""
-        return "cache/journal_mapping_cache.pkl"
+        return "cache/journal_mapping_cache.json.gz"  # 使用安全的json+gzip格式
     
     def _get_data_files_hash(self) -> str:
         """计算数据文件的哈希值，用于检测文件是否有更新"""
-        hash_obj = hashlib.md5()
-        
+        hash_obj = hashlib.sha256()  # 使用更安全的SHA256算法
+
         # 计算中科院数据文件的哈希
         if os.path.exists(self.zky_data_path):
             with open(self.zky_data_path, 'rb') as f:
                 hash_obj.update(f.read())
-        
+
         # 计算JCR数据文件的哈希
         if os.path.exists(self.jcr_data_path):
             with open(self.jcr_data_path, 'rb') as f:
                 hash_obj.update(f.read())
-        
+
         return hash_obj.hexdigest()
     
     def _load_mapping_cache(self) -> Optional[Dict[str, Dict]]:
-        """加载期刊映射表缓存"""
+        """加载期刊映射表缓存（使用安全的json格式）"""
         cache_path = self._get_mapping_cache_path()
-        
+
         if not os.path.exists(cache_path):
             return None
-        
+
         try:
-            with open(cache_path, 'rb') as f:
-                cache_data = pickle.load(f)
-            
+            # 使用gzip+json替代pickle，避免反序列化攻击
+            with gzip.open(cache_path, 'rt', encoding='utf-8') as f:
+                cache_data = json.load(f)
+
             # 检查缓存的数据版本
             current_hash = self._get_data_files_hash()
             cached_hash = cache_data.get('data_hash', '')
             cached_time = cache_data.get('cached_at', 0)
-            
-            # 检查缓存是否过期（90天，3个月）
+
+            # 检查缓存是否过期
             cache_age_days = (time.time() - cached_time) / (24 * 3600)
-            
+
             if current_hash != cached_hash:
                 print(f"[CACHE] 数据文件已更新，缓存失效")
                 return None
-            elif cache_age_days > 90:
+            elif cache_age_days > CACHE_EXPIRY_DAYS:
                 print(f"[CACHE] 缓存已过期 ({cache_age_days:.1f}天)，将重新构建")
                 return None
             else:
                 print(f"[CACHE] 使用期刊映射表缓存 (缓存时间: {cache_age_days:.1f}天)")
                 return cache_data['mapping']
-                
+
+        except (json.JSONDecodeError, gzip.BadGzipFile) as e:
+            print(f"[CACHE] 缓存文件损坏，将重新构建: {e}")
+            return None
         except Exception as e:
             print(f"[CACHE] 加载缓存失败: {e}")
             return None
     
     def _save_mapping_cache(self, mapping: Dict[str, Dict]):
-        """保存期刊映射表缓存"""
+        """保存期刊映射表缓存（使用安全的json格式）"""
         cache_path = self._get_mapping_cache_path()
-        
+
         # 确保缓存目录存在
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        
+
         try:
             cache_data = {
                 'mapping': mapping,
                 'data_hash': self._get_data_files_hash(),
                 'cached_at': time.time(),
-                'version': '1.0'
+                'version': '2.0'  # 更新版本号表示格式变更
             }
-            
-            with open(cache_path, 'wb') as f:
-                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
-                
+
+            # 使用gzip+json替代pickle，避免反序列化攻击
+            with gzip.open(cache_path, 'wt', encoding='utf-8') as f:
+                json.dump(cache_data, f)
+
             print(f"[CACHE] 期刊映射表缓存已保存")
-            
+
         except Exception as e:
             print(f"[CACHE] 保存缓存失败: {e}")
     
@@ -576,7 +593,9 @@ class LiteratureFilter:
         return journal_info
     
     def get_journal_info(self, issn: str, eissn: str) -> Dict:
-        """兼容性方法"""
+        """兼容性方法 - 已废弃，请使用 get_journal_info_optimized"""
+        import warnings
+        warnings.warn("get_journal_info 已废弃，请使用 get_journal_info_optimized", DeprecationWarning, stacklevel=2)
         return self.get_journal_info_optimized(issn, eissn)
     
     def filter_articles_optimized(self, articles: List[Dict], criteria: SearchCriteria) -> List[Dict]:
@@ -753,7 +772,9 @@ class LiteratureFilter:
         return batch_results
     
     def filter_articles(self, articles: List[Dict], criteria: SearchCriteria) -> List[Dict]:
-        """兼容性方法"""
+        """兼容性方法 - 已废弃，请使用 filter_articles_optimized"""
+        import warnings
+        warnings.warn("filter_articles 已废弃，请使用 filter_articles_optimized", DeprecationWarning, stacklevel=2)
         return self.filter_articles_optimized(articles, criteria)
     
     def _meets_criteria_basic(self, article: Dict, criteria: SearchCriteria) -> bool:
@@ -814,15 +835,16 @@ class LiteratureFilter:
         """从发表日期中提取年份"""
         if not pub_date:
             return None
-        
+
         # 尝试提取4位数字年份
         year_match = re.search(r'(\d{4})', str(pub_date))
         if year_match:
             year = int(year_match.group(1))
-            # 合理的年份范围
-            if 1900 <= year <= 2030:
+            # 合理的年份范围 - 使用动态计算避免硬编码
+            current_year = datetime.now().year
+            if 1900 <= year <= current_year + MAX_YEAR_OFFSET:
                 return year
-        
+
         return None
     
     def _enhance_article_info(self, article: Dict) -> Dict:

@@ -27,14 +27,17 @@ class IntelligentLiteratureCLI:
         self.project_root = Path(__file__).parent.parent  # 修正为真正的项目根目录
         self.venv_path = self.project_root / "venv"
         self.requirements_file = self.project_root / "requirements.txt"
-        self.ai_config_file = self.project_root / "ai_config.yaml"
+        self.env_file = self.project_root / ".env"
+        self.env_example_file = self.project_root / ".env.example"
+        # 向后兼容属性: ai_config_file 现在指向 .env
+        self.ai_config_file = self.env_file
         self.prompts_config_file = self.project_root / "prompts" / "prompts_config.yaml"
         self.data_dir = self.project_root / "data"
-        
+
         # 确保必要的目录存在
         self.data_dir.mkdir(exist_ok=True)
         (self.project_root / "prompts").mkdir(exist_ok=True)
-        
+
         # 支持的Python版本
         self.min_python_version = (3, 8)
         self.recommended_python_version = (3, 9)
@@ -153,11 +156,18 @@ class IntelligentLiteratureCLI:
     def _get_installed_packages(self) -> Dict[str, Dict[str, str]]:
         """获取已安装的包信息"""
         try:
-            result = subprocess.run([sys.executable, "-m", "pip", "list", "--format=json"], 
+            # 优先使用虚拟环境的 Python
+            if platform.system() == "Windows":
+                venv_python = self.venv_path / "Scripts" / "python.exe"
+            else:
+                venv_python = self.venv_path / "bin" / "python"
+
+            python_exe = str(venv_python) if venv_python.exists() else sys.executable
+            result = subprocess.run([python_exe, "-m", "pip", "list", "--format=json"],
                                   capture_output=True, text=True, check=True)
             packages = json.loads(result.stdout)
             return {pkg["name"].lower(): {"version": pkg["version"]} for pkg in packages}
-        except:
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
             return {}
     
     def _parse_requirement(self, requirement: str) -> Tuple[str, Optional[str]]:
@@ -174,21 +184,49 @@ class IntelligentLiteratureCLI:
         """检查版本是否满足要求"""
         if not required_version or not installed_version:
             return True
-        
-        # 简化的版本检查
-        if required_version.startswith(">="):
-            return installed_version >= required_version[2:]
-        elif required_version.startswith("=="):
-            return installed_version == required_version[2:]
-        elif required_version.startswith("<="):
-            return installed_version <= required_version[2:]
-        elif required_version.startswith(">"):
-            return installed_version > required_version[1:]
-        elif required_version.startswith("<"):
-            return installed_version < required_version[1:]
-        elif required_version.startswith("!="):
-            return installed_version != required_version[2:]
-        
+
+        def parse_version(v: str) -> tuple:
+            """将版本字符串解析为可比较的元组"""
+            # 移除非数字后缀 (如 a1, b2, rc1)
+            import re
+            v = re.split(r'[a-zA-Z]', v)[0]
+            parts = v.split('.')
+            result = []
+            for p in parts:
+                try:
+                    result.append(int(p))
+                except ValueError:
+                    result.append(0)
+            # 确保至少有3个部分
+            while len(result) < 3:
+                result.append(0)
+            return tuple(result)
+
+        try:
+            installed_tuple = parse_version(installed_version)
+
+            # 简化的版本检查
+            if required_version.startswith(">="):
+                required_tuple = parse_version(required_version[2:])
+                return installed_tuple >= required_tuple
+            elif required_version.startswith("=="):
+                required_tuple = parse_version(required_version[2:])
+                return installed_tuple == required_tuple
+            elif required_version.startswith("<="):
+                required_tuple = parse_version(required_version[2:])
+                return installed_tuple <= required_tuple
+            elif required_version.startswith(">"):
+                required_tuple = parse_version(required_version[1:])
+                return installed_tuple > required_tuple
+            elif required_version.startswith("<"):
+                required_tuple = parse_version(required_version[1:])
+                return installed_tuple < required_tuple
+            elif required_version.startswith("!="):
+                required_tuple = parse_version(required_version[2:])
+                return installed_tuple != required_tuple
+        except Exception:
+            pass
+
         return True
     
     def install_dependencies(self, upgrade: bool = False) -> bool:
@@ -218,52 +256,57 @@ class IntelligentLiteratureCLI:
             return False
     
     def check_ai_config(self) -> Dict[str, Any]:
-        """检查AI配置状态"""
+        """检查AI配置状态（从环境变量）"""
+        # 导入新的配置模块
+        try:
+            sys.path.insert(0, str(self.project_root / "src"))
+            from ai_config import get_ai_config
+            ai_config = get_ai_config()
+        except ImportError:
+            ai_config = None
+
         config_status = {
-            "config_file": self.ai_config_file,
-            "file_exists": self.ai_config_file.exists(),
+            "env_file": self.env_file,
+            "file_exists": self.env_file.exists(),
             "services": [],
             "default_service": None,
             "valid_services": 0,
             "invalid_services": 0
         }
-        
-        if not config_status["file_exists"]:
+
+        if ai_config is None:
             return config_status
-        
-        try:
-            with open(self.ai_config_file, 'r', encoding='utf-8') as f:
-                config_data = yaml.safe_load(f)
-            
-            if "ai_services" in config_data:
-                for service_name, service_config in config_data["ai_services"].items():
-                    service_info = {
-                        "name": service_name,
-                        "status": service_config.get("status", "unknown"),
-                        "api_type": service_config.get("api_type", "unknown"),
-                        "has_api_key": bool(service_config.get("api_key")),
-                        "has_base_url": bool(service_config.get("base_url")),
-                        "has_model": bool(service_config.get("default_model")),
-                        "api_key": service_config.get("api_key", ""),
-                        "base_url": service_config.get("base_url", ""),
-                        "default_model": service_config.get("default_model", ""),
-                        "timeout": service_config.get("timeout", 900)
-                    }
-                    
-                    if service_info["has_api_key"] and service_info["status"] == "active":
-                        service_info["valid"] = True
-                        config_status["valid_services"] += 1
-                    else:
-                        service_info["valid"] = False
-                        config_status["invalid_services"] += 1
-                    
-                    config_status["services"].append(service_info)
-            
-            config_status["default_service"] = config_data.get("default_service")
-        
-        except Exception as e:
-            print(f"读取AI配置文件失败: {e}")
-        
+
+        # 获取所有服务配置
+        for service_name in ai_config.list_services():
+            service = ai_config.get_service(service_name)
+            if service:
+                service_info = {
+                    "name": service_name,
+                    "status": service.status,
+                    "api_type": service.api_type,
+                    "has_api_key": bool(service.api_key) and not service.api_key.startswith("sk-your"),
+                    "has_base_url": bool(service.base_url),
+                    "has_model": bool(service.model),
+                    "api_key": service.api_key,
+                    "base_url": service.base_url,
+                    "default_model": service.model,
+                    "timeout": service.timeout
+                }
+
+                if service_info["has_api_key"] and service.is_active():
+                    service_info["valid"] = True
+                    config_status["valid_services"] += 1
+                else:
+                    service_info["valid"] = False
+                    config_status["invalid_services"] += 1
+
+                config_status["services"].append(service_info)
+
+        active = ai_config.get_active_service()
+        if active:
+            config_status["default_service"] = active.name
+
         return config_status
     
     def check_prompts_config(self) -> Dict[str, Any]:
@@ -306,59 +349,56 @@ class IntelligentLiteratureCLI:
         return config_status
     
     def setup_ai_config(self) -> bool:
-        """设置AI配置"""
+        """设置AI配置（创建.env文件）"""
         print("AI配置设置向导")
         print("=" * 50)
-        
-        # 创建默认配置
-        default_config = {
-            "ai_services": {
-                "openai": {
-                    "name": "OpenAI",
-                    "description": "OpenAI GPT模型服务",
-                    "api_type": "openai",
-                    "base_url": "https://api.openai.com/v1",
-                    "api_key": "",
-                    "default_model": "gpt-3.5-turbo",
-                    "timeout": 900,
-                    "status": "inactive"
-                },
-                "ai_wave": {
-                    "name": "AI Wave",
-                    "description": "AI Wave OpenAI兼容服务",
-                    "api_type": "openai",
-                    "base_url": "https://www.ai-wave.org/",
-                    "api_key": "",
-                    "default_model": "gpt-3.5-turbo",
-                    "timeout": 900,
-                    "status": "inactive"
-                }
-            },
-            "default_service": "openai",
-            "settings": {
-                "auto_retry": True,
-                "max_retries": 3,
-                "show_service_status": True,
-                "allow_service_switch": True
-            }
-        }
-        
-        # 如果配置文件已存在，先备份
-        if self.ai_config_file.exists():
-            backup_file = self.ai_config_file.with_suffix(f'.yaml.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
-            shutil.copy2(self.ai_config_file, backup_file)
+
+        # 如果.env文件已存在，先备份
+        if self.env_file.exists():
+            backup_file = self.env_file.with_suffix(f'.env.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            shutil.copy2(self.env_file, backup_file)
             print(f"已备份现有配置文件: {backup_file}")
-        
-        try:
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                yaml.dump(default_config, f, default_flow_style=False, allow_unicode=True, indent=2)
-            
-            print(f"AI配置文件已创建: {self.ai_config_file}")
-            print("请编辑配置文件，添加您的API密钥")
-            return True
-        except Exception as e:
-            print(f"创建AI配置文件失败: {e}")
-            return False
+
+        # 复制.env.example到.env
+        if self.env_example_file.exists():
+            try:
+                shutil.copy2(self.env_example_file, self.env_file)
+                print(f"AI配置文件已创建: {self.env_file}")
+                print("请编辑 .env 文件，添加您的API密钥和服务配置")
+                print("\n配置项说明:")
+                print("  - OPENAI_API_KEY: OpenAI API密钥")
+                print("  - OPENAI_BASE_URL: API端点地址")
+                print("  - DEFAULT_AI_SERVICE: 默认使用的服务")
+                return True
+            except Exception as e:
+                print(f"创建配置文件失败: {e}")
+                return False
+        else:
+            # 创建基础.env文件
+            default_env = """# AI服务配置
+# 请填入您的API密钥
+
+# OpenAI配置
+OPENAI_API_KEY=sk-your_key_here
+OPENAI_BASE_URL=https://api.openai.com/
+OPENAI_MODEL=gpt-4-turbo
+
+# 默认服务
+DEFAULT_AI_SERVICE=openai
+
+# 通用设置
+AI_REQUEST_TIMEOUT=300
+AI_MAX_RETRIES=3
+"""
+            try:
+                with open(self.env_file, 'w', encoding='utf-8') as f:
+                    f.write(default_env)
+                print(f"AI配置文件已创建: {self.env_file}")
+                print("请编辑 .env 文件，添加您的API密钥")
+                return True
+            except Exception as e:
+                print(f"创建AI配置文件失败: {e}")
+                return False
     
     def setup_prompts_config(self) -> bool:
         """设置提示词配置"""
@@ -500,7 +540,7 @@ def main():
         # AI配置状态
         ai_config = cli.check_ai_config()
         print(f"\nAI配置状态:")
-        print(f"  配置文件: {ai_config['config_file']}")
+        print(f"  配置文件: {ai_config['env_file']}")
         if ai_config['file_exists']:
             print(f"  有效服务: {ai_config['valid_services']}")
             print(f"  无效服务: {ai_config['invalid_services']}")

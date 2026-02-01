@@ -79,11 +79,15 @@ class IntentAnalysisCache:
     
     def put(self, user_input: str, model_id: str, parameters: Dict, criteria: 'SearchCriteria'):
         """缓存意图分析结果"""
+        # 如果缓存大小为0，表示禁用缓存
+        if self.cache_size <= 0:
+            return
+
         cache_key = self._generate_cache_key(user_input, model_id, parameters)
-        
+
         with self.lock:
             # LRU缓存清理
-            if len(self.cache) >= self.cache_size:
+            if len(self.cache) >= self.cache_size and self.access_times:
                 oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
                 del self.cache[oldest_key]
                 del self.access_times[oldest_key]
@@ -143,17 +147,18 @@ class ConfigManagerPool:
             self.lock = threading.Lock()
             self._initialized = True
     
-    def get_config_manager(self, config_file: str = "ai_config.yaml") -> ConfigManager:
-        """获取配置管理器实例"""
+    def get_config_manager(self, config_file: str = None) -> ConfigManager:
+        """获取配置管理器实例（config_file参数已废弃）"""
         with self.lock:
-            if config_file not in self.config_managers:
-                self.config_managers[config_file] = ConfigManager(config_file)
-            return self.config_managers[config_file]
-    
-    def get_ai_client(self, config_file: str = "ai_config.yaml", 
+            cache_key = "default"
+            if cache_key not in self.config_managers:
+                self.config_managers[cache_key] = ConfigManager()
+            return self.config_managers[cache_key]
+
+    def get_ai_client(self, config_file: str = None,
                      enable_cache: bool = True, enable_retry: bool = True) -> AIClient:
-        """获取AI客户端实例"""
-        key = f"{config_file}:{enable_cache}:{enable_retry}"
+        """获取AI客户端实例（config_file参数已废弃）"""
+        key = f"default:{enable_cache}:{enable_retry}"
         with self.lock:
             if key not in self.ai_clients:
                 self.ai_clients[key] = AIClient(enable_cache, enable_retry)
@@ -298,7 +303,7 @@ class IntentAnalyzer:
             print("1. AI服务配置可能有误（API密钥、端点URL等）")
             print("2. 网络连接问题或服务不可用")
             print("3. API配额已用完或权限不足")
-            print("\n请检查您的AI配置文件 (ai_config.yaml) 并确保：")
+            print("\n请检查您的AI配置文件 (.env) 并确保：")
             print("- API密钥正确且有效")
             print("- 端点URL正确") 
             print("- 网络连接正常")
@@ -349,7 +354,7 @@ class IntentAnalyzer:
                 # 删除损坏的缓存文件
                 try:
                     os.remove(self.CONFIG_CACHE_FILE)
-                except:
+                except (OSError, PermissionError):
                     pass
         return None
     
@@ -494,7 +499,7 @@ class IntentAnalyzer:
                 print("1. AI服务配置可能有误（API密钥、端点URL等）")
                 print("2. 网络连接问题或服务不可用")
                 print("3. API配额已用完或权限不足")
-                print("\n请检查您的AI配置文件 (ai_config.yaml) 并确保：")
+                print("\n请检查您的AI配置文件 (.env) 并确保：")
                 print("- API密钥正确且有效")
                 print("- 端点URL正确") 
                 print("- 网络连接正常")
@@ -957,14 +962,34 @@ class IntentAnalyzer:
         # 验证影响因子
         min_if = data.get('min_if')
         max_if = data.get('max_if')
-        
-        if min_if and max_if:
+
+        # 类型转换：确保 min_if 和 max_if 是数值类型
+        if min_if is not None:
+            try:
+                min_if = float(min_if)
+                # 单独校验 min_if 范围
+                if min_if < 0:
+                    min_if = 0
+                if min_if > 100:
+                    min_if = 100
+            except (ValueError, TypeError):
+                min_if = None
+
+        if max_if is not None:
+            try:
+                max_if = float(max_if)
+                # 单独校验 max_if 范围
+                if max_if < 0:
+                    max_if = 0
+                if max_if > 100:
+                    max_if = 100
+            except (ValueError, TypeError):
+                max_if = None
+
+        # 当两者都存在时，确保 min <= max
+        if min_if is not None and max_if is not None:
             if min_if > max_if:
                 min_if, max_if = max_if, min_if
-            if min_if < 0:
-                min_if = 0
-            if max_if > 100:
-                max_if = 100
         
         validated['min_if'] = min_if
         validated['max_if'] = max_if

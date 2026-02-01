@@ -205,3 +205,50 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ==========================================
+# Project-specific ignores
+# ==========================================
+
+# AI model cache
+ai_model_cache.json
+
+# PubMed search cache
+pubmed_cache/
+
+# Generated output directories
+output/
+
+# Local cache directory
+.cache/
+
+# System cache
+.system_cache/
+
+# BMAD framework
+_bmad/
+_bmad-output/
+
+# Claude AI assistant
+.claude/
+
+# Cache and logs
+cache/
+logs/
+
+# Tools (Pandoc etc.)
+tools/
+
+# Virtual environment (already covered but explicit)
+venv/
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
