@@ -212,6 +212,7 @@ __marimo__/
 
 # AI model cache
 ai_model_cache.json
+system_state.json
 
 # PubMed search cache
 pubmed_cache/
