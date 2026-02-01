@@ -1719,7 +1719,7 @@ class IntelligentLiteratureSystem:
             eissn = article.get('eissn', '')
             
             # 获取期刊质量信息
-            journal_info = self.literature_filter.get_journal_info(issn, eissn)
+            journal_info = self.literature_filter.get_journal_info_optimized(issn, eissn)
             
             # 添加期刊信息到文章数据中
             enriched_article = article.copy()
