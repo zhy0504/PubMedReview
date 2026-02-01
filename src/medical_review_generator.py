@@ -693,10 +693,13 @@ class MedicalReviewGenerator:
             
             # 首先添加完整的AMA格式参考文献列表
             article_content = self._add_complete_references(article_content, literature)
-            
-            # 然后重新排序引用标记和参考文献
-            article_content = self._reorder_citations_and_references(article_content, literature)
-            
+
+            # 然后重新排序引用标记和参考文献，返回重排序后的文献列表
+            article_content, reordered_literature = self._reorder_citations_and_references(article_content, literature)
+
+            # 将正文引用标号转换为超链接（使用重排序后的文献列表）
+            article_content = self._add_citation_hyperlinks(article_content, reordered_literature)
+
             print("完整医学综述文章生成完成!")
             
             return article_content.strip()
@@ -889,27 +892,93 @@ class MedicalReviewGenerator:
             print("添加了新的参考文献部分")
         
         print(f"引用重新编号完成: {len(literature)} → {len(cited_literature)} 篇文献")
-        
-        return updated_content
+
+        return updated_content, cited_literature
     
     def generate_references(self, literature: List[Literature]) -> str:
         """
-        生成AMA格式的参考文献列表
-        
+        生成AMA格式的参考文献列表，PubMed地址超链接化
+
         Args:
             literature: 文献列表
-            
+
         Returns:
-            str: 格式化的参考文献
+            str: 格式化的参考文献（含超链接）
         """
         references = []
         for i, lit in enumerate(literature, 1):
             ref = f"{i}. {lit.get_ama_citation()}"
             if lit.url:
-                ref += f" Available from: {lit.url}"
+                # 使用Markdown链接格式，Pandoc会转换为DOCX超链接
+                ref += f" Available from: [{lit.url}]({lit.url})"
             references.append(ref)
-        
+
         return '\n'.join(references)
+
+    def _add_citation_hyperlinks(self, content: str, literature: List[Literature]) -> str:
+        """
+        将正文中的引用标号转换为超链接，链接到对应的PubMed地址
+
+        Args:
+            content: 文章内容
+            literature: 文献列表
+
+        Returns:
+            str: 添加了引用超链接的内容
+        """
+        # 构建引用编号到URL的映射
+        citation_urls = {}
+        for i, lit in enumerate(literature, 1):
+            if lit.url:
+                citation_urls[i] = lit.url
+
+        # 匹配引用标号，如[1]、[2]、[1,2]、[1-3]等
+        def replace_citation(match):
+            citation_text = match.group(0)  # 如 [1] 或 [1,2]
+            inner_text = match.group(1)     # 如 1 或 1,2
+
+            # 处理单个引用 [1]
+            if inner_text.isdigit():
+                num = int(inner_text)
+                if num in citation_urls:
+                    return f"[[{num}]]({citation_urls[num]})"
+                return citation_text
+
+            # 处理范围引用 [1-3]
+            if '-' in inner_text and ',' not in inner_text:
+                parts = inner_text.split('-')
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    start, end = int(parts[0]), int(parts[1])
+                    links = []
+                    for num in range(start, end + 1):
+                        if num in citation_urls:
+                            links.append(f"[[{num}]]({citation_urls[num]})")
+                        else:
+                            links.append(f"[{num}]")
+                    return ''.join(links)
+
+            # 处理多个引用 [1,2,3]
+            if ',' in inner_text:
+                nums = [n.strip() for n in inner_text.split(',')]
+                links = []
+                for n in nums:
+                    if n.isdigit():
+                        num = int(n)
+                        if num in citation_urls:
+                            links.append(f"[[{num}]]({citation_urls[num]})")
+                        else:
+                            links.append(f"[{num}]")
+                    else:
+                        links.append(f"[{n}]")
+                return ''.join(links)
+
+            return citation_text
+
+        # 匹配 [数字] 或 [数字,数字] 或 [数字-数字] 格式
+        pattern = r'\[(\d+(?:[-,]\d+)*)\]'
+        content = re.sub(pattern, replace_citation, content)
+
+        return content
     
     def _save_raw_output(self, raw_content: str, title: str):
         """
