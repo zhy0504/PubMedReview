@@ -219,6 +219,7 @@ pubmed_cache/
 
 # Generated output directories
 output/
+综述AI返回原始数据（用于核对）/
 
 # Local cache directory
 .cache/
