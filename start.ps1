@@ -130,14 +130,8 @@ function Test-SystemEnvironment {
         }
     } catch {
         Write-Host "[WARNING] Could not check disk space: $($_.Exception.Message)" -ForegroundColor Yellow
-        # Try one more alternative method
-        try {
-            $driveLetter = (Get-Location).Path.Substring(0,2)
-            $freeSpace = (Get-ChildItem $driveLetter\ | Measure-Object -Property Length -Sum).Sum
-            Write-Host "[INFO] Disk space check completed with alternative method" -ForegroundColor Cyan
-        } catch {
-            Write-Host "[DEBUG] All disk space check methods failed" -ForegroundColor Gray
-        }
+        # Alternative method unavailable
+        Write-Host "[DEBUG] Disk space check methods exhausted, continuing" -ForegroundColor Gray
     }
     
     # Check write permissions
