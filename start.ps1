@@ -157,6 +157,25 @@ function Test-SystemEnvironment {
     return $true
 }
 
+# Resolve virtual environment Python path across common layouts
+function Get-VenvPythonPath {
+    $candidates = @(
+        "venv\Scripts\python.exe",
+        "venv\Scripts\python",
+        "venv\bin\python3",
+        "venv\bin\python",
+        "venv\python.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
 # Run diagnostics
 if (-not (Test-PythonEnvironment)) {
     Read-Host "Press Enter to exit"
@@ -169,18 +188,29 @@ if (-not (Test-SystemEnvironment)) {
 }
 
 # Enhanced virtual environment creation with detailed error logging
-if (-not (Test-Path "venv")) {
-    Write-Host "[INFO] Creating virtual environment..." -ForegroundColor Yellow
+$venvPythonPath = Get-VenvPythonPath
+$venvNeedsCreation = (-not (Test-Path "venv")) -or (-not $venvPythonPath)
+
+if ($venvNeedsCreation) {
+    if ((Test-Path "venv") -and (-not $venvPythonPath)) {
+        Write-Host "[WARNING] Virtual environment exists but Python executable is missing, rebuilding venv..." -ForegroundColor Yellow
+    } else {
+        Write-Host "[INFO] Creating virtual environment..." -ForegroundColor Yellow
+    }
     
     # Create error log file
     $errorLogFile = "venv_creation_error.log"
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $venvArgs = @("-m", "venv", "venv")
+    if (Test-Path "venv") {
+        $venvArgs = @("-m", "venv", "--clear", "venv")
+    }
     
-    Write-Host "[DEBUG] Running: python -m venv venv" -ForegroundColor Gray
+    Write-Host "[DEBUG] Running: python $($venvArgs -join ' ')" -ForegroundColor Gray
     
     # Capture both stdout and stderr
     try {
-        $process = Start-Process -FilePath "python" -ArgumentList "-m", "venv", "venv" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "venv_stdout.tmp" -RedirectStandardError "venv_stderr.tmp"
+        $process = Start-Process -FilePath "python" -ArgumentList $venvArgs -NoNewWindow -Wait -PassThru -RedirectStandardOutput "venv_stdout.tmp" -RedirectStandardError "venv_stderr.tmp"
         
         $exitCode = $process.ExitCode
         $stdout = ""
@@ -272,7 +302,8 @@ $(
             Write-Host "[SUCCESS] Virtual environment created successfully" -ForegroundColor Green
             
             # Verify venv structure
-            if (Test-Path "venv\Scripts\python.exe") {
+            $venvPythonPath = Get-VenvPythonPath
+            if ($venvPythonPath) {
                 Write-Host "[VERIFY] Virtual environment structure is correct" -ForegroundColor Green
             } else {
                 Write-Host "[WARNING] Virtual environment created but structure seems incomplete" -ForegroundColor Yellow
@@ -311,8 +342,10 @@ $($_.Exception | Format-List * | Out-String)
 
 # Check virtual environment Python
 Write-Host "[INFO] Using virtual environment Python..." -ForegroundColor Cyan
-if (-not (Test-Path "venv\Scripts\python.exe")) {
+$venvPythonPath = Get-VenvPythonPath
+if (-not $venvPythonPath) {
     Write-Host "[ERROR] Virtual environment Python not found" -ForegroundColor Red
+    Write-Host "[HELP] Try deleting 'venv' and rerun this script to recreate it" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -359,7 +392,7 @@ if (Test-Path $cacheFile) {
 # Install dependencies (if needed)
 if (-not $skipDependencyCheck) {
     Write-Host "[INFO] Checking dependencies with progress indicator..." -ForegroundColor Yellow
-& "venv\Scripts\python.exe" -c "
+& $venvPythonPath -c "
 import sys
 import time
 import re
@@ -498,10 +531,9 @@ else:
         Write-Host "[SUCCESS] Fastest mirror: $($fastestMirror.Name) (${fastestTime}ms)" -ForegroundColor Green
         Write-Host "[INFO] Installing dependencies..." -ForegroundColor Cyan
         
-        $pipPath = "venv\Scripts\pip.exe"
-        $installArgs = @("install", "-r", "requirements.txt", "--progress-bar", "on", "--no-warn-script-location") + $fastestMirror.Args
+        $installArgs = @("-m", "pip", "install", "-r", "requirements.txt", "--progress-bar", "on", "--no-warn-script-location") + $fastestMirror.Args
         
-        & $pipPath $installArgs
+        & $venvPythonPath $installArgs
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[SUCCESS] Dependencies installed successfully from $($fastestMirror.Name)" -ForegroundColor Green
@@ -527,7 +559,7 @@ else:
 
 # Show current Python path
 Write-Host "[INFO] Current Python path:" -ForegroundColor Cyan
-& "venv\Scripts\python.exe" -c "import sys; print(sys.executable)"
+& $venvPythonPath -c "import sys; print(sys.executable)"
 
 # Start system
 Write-Host ""
@@ -546,7 +578,7 @@ if ($useCache) {
 # Skip banner since PowerShell script already showed it
 $env:PS_SKIP_BANNER = "true"
 
-& "venv\Scripts\python.exe" src\start.py $args
+& $venvPythonPath src\start.py $args
 
 # Clean up environment variables
 Remove-Item env:PS_CACHE_USED -ErrorAction SilentlyContinue
