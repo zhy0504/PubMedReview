@@ -41,6 +41,40 @@ class IntelligentLiteratureCLI:
         # 支持的Python版本
         self.min_python_version = (3, 8)
         self.recommended_python_version = (3, 9)
+
+    @staticmethod
+    def _is_interactive_terminal() -> bool:
+        """检测当前是否为可交互终端。"""
+        stdin = getattr(sys, "stdin", None)
+        return bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
+
+    def _prompt_yes_no(self, message: str, default: bool = False) -> bool:
+        """
+        安全的Y/N提示。
+        在非交互环境或读取输入失败时，返回默认值。
+        """
+        if not self._is_interactive_terminal():
+            return default
+
+        try:
+            choice = input(message).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return default
+
+        if not choice:
+            return default
+        return choice in {"y", "yes"}
+
+    def _get_preferred_python(self) -> str:
+        """优先返回虚拟环境Python；不存在时回退到当前解释器。"""
+        if platform.system() == "Windows":
+            venv_python = self.venv_path / "Scripts" / "python.exe"
+        else:
+            venv_python = self.venv_path / "bin" / "python"
+
+        if venv_python.exists():
+            return str(venv_python)
+        return sys.executable
     
     def check_python_version(self) -> Tuple[bool, str]:
         """检查Python版本"""
@@ -156,13 +190,7 @@ class IntelligentLiteratureCLI:
     def _get_installed_packages(self) -> Dict[str, Dict[str, str]]:
         """获取已安装的包信息"""
         try:
-            # 优先使用虚拟环境的 Python
-            if platform.system() == "Windows":
-                venv_python = self.venv_path / "Scripts" / "python.exe"
-            else:
-                venv_python = self.venv_path / "bin" / "python"
-
-            python_exe = str(venv_python) if venv_python.exists() else sys.executable
+            python_exe = self._get_preferred_python()
             result = subprocess.run([python_exe, "-m", "pip", "list", "--format=json"],
                                   capture_output=True, text=True, check=True)
             packages = json.loads(result.stdout)
@@ -172,8 +200,8 @@ class IntelligentLiteratureCLI:
     
     def _parse_requirement(self, requirement: str) -> Tuple[str, Optional[str]]:
         """解析依赖包要求"""
-        # 匹配包名和版本要求
-        match = re.match(r'^([a-zA-Z0-9_-]+)([>=<!=]+.*)?$', requirement.strip())
+        # 支持 name[extra]>=1.2、name==1.0、name 等常见格式
+        match = re.match(r'^([a-zA-Z0-9_.-]+)(?:\[[^\]]+\])?\s*([><=!~]=?.*)?$', requirement.strip())
         if match:
             pkg_name = match.group(1).lower()
             version_spec = match.group(2)
@@ -231,19 +259,14 @@ class IntelligentLiteratureCLI:
     
     def install_dependencies(self, upgrade: bool = False) -> bool:
         """安装依赖包"""
-        venv_status = self.detect_virtual_environment()
-        
-        if not venv_status["venv_active"]:
-            print("请先激活虚拟环境")
-            return False
-        
         if not self.requirements_file.exists():
             print(f"依赖文件不存在: {self.requirements_file}")
             return False
-        
+
         try:
+            python_exe = self._get_preferred_python()
             print("正在安装依赖包...")
-            cmd = [sys.executable, "-m", "pip", "install", "-r", str(self.requirements_file)]
+            cmd = [python_exe, "-m", "pip", "install", "-r", str(self.requirements_file)]
             if upgrade:
                 cmd.append("--upgrade")
             
@@ -259,9 +282,11 @@ class IntelligentLiteratureCLI:
         """检查AI配置状态（从环境变量）"""
         # 导入新的配置模块
         try:
-            sys.path.insert(0, str(self.project_root / "src"))
+            src_path = str(self.project_root / "src")
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
             from ai_config import get_ai_config
-            ai_config = get_ai_config()
+            ai_config = get_ai_config(force_reload=True)
         except ImportError:
             ai_config = None
 
@@ -281,11 +306,13 @@ class IntelligentLiteratureCLI:
         for service_name in ai_config.list_services():
             service = ai_config.get_service(service_name)
             if service:
+                placeholder_checker = getattr(ai_config, "_is_placeholder", None)
+                is_placeholder = callable(placeholder_checker) and placeholder_checker(service.api_key)
                 service_info = {
                     "name": service_name,
                     "status": service.status,
                     "api_type": service.api_type,
-                    "has_api_key": bool(service.api_key) and not service.api_key.startswith("sk-your"),
+                    "has_api_key": bool(service.api_key) and not is_placeholder,
                     "has_base_url": bool(service.base_url),
                     "has_model": bool(service.model),
                     "api_key": service.api_key,
@@ -453,7 +480,7 @@ AI_MAX_RETRIES=3
         """启动项目"""
         venv_status = self.detect_virtual_environment()
         
-        if not venv_status["venv_active"]:
+        if not venv_status["venv_active"] and not venv_status.get("venv_python"):
             print("请先激活虚拟环境")
             activate_cmd = self.activate_virtual_environment()
             if activate_cmd:
@@ -464,26 +491,29 @@ AI_MAX_RETRIES=3
         req_status = self.get_requirements_status()
         if req_status["missing_packages"]:
             print(f"缺少依赖包: {', '.join(req_status['missing_packages'])}")
-            if input("是否安装缺少的依赖包? (y/n): ").lower() == 'y':
-                self.install_dependencies()
+            should_install = self._prompt_yes_no("是否安装缺少的依赖包? (y/n): ", default=False)
+            if should_install and not self.install_dependencies():
+                return False
         
         # 检查AI配置
         ai_config = self.check_ai_config()
         if ai_config["valid_services"] == 0:
             print("没有有效的AI服务配置")
-            if input("是否配置AI服务? (y/n): ").lower() == 'y':
-                self.setup_ai_config()
+            should_setup = self._prompt_yes_no("是否配置AI服务? (y/n): ", default=False)
+            if should_setup and not self.setup_ai_config():
+                return False
         
         # 启动项目
         try:
+            python_exe = self._get_preferred_python()
             if mode == "interactive":
-                cmd = [sys.executable, str(self.project_root / "src" / "start.py")]
+                cmd = [python_exe, str(self.project_root / "src" / "start.py")]
             else:
-                cmd = [sys.executable, str(self.project_root / "src" / "intelligent_literature_system.py")]
+                cmd = [python_exe, str(self.project_root / "src" / "intelligent_literature_system.py")]
             
             print(f"启动项目: {' '.join(cmd)}")
-            subprocess.run(cmd)
-            return True
+            result = subprocess.run(cmd)
+            return result.returncode == 0
         except Exception as e:
             print(f"启动项目失败: {e}")
             return False

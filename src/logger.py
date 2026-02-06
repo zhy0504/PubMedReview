@@ -59,11 +59,14 @@ class ColoredFormatter(logging.Formatter):
         self.use_colors = use_colors and sys.stdout.isatty()
 
     def format(self, record: logging.LogRecord) -> str:
+        target_record = record
         if self.use_colors:
-            color = self.LEVEL_COLORS.get(record.levelno, LogColors.RESET)
-            record.levelname = f"{color}{record.levelname}{LogColors.RESET}"
-            record.msg = f"{color}{record.msg}{LogColors.RESET}"
-        return super().format(record)
+            # 使用副本避免污染其他handler共享的LogRecord
+            target_record = logging.makeLogRecord(record.__dict__.copy())
+            color = self.LEVEL_COLORS.get(target_record.levelno, LogColors.RESET)
+            target_record.levelname = f"{color}{target_record.levelname}{LogColors.RESET}"
+            target_record.msg = f"{color}{target_record.msg}{LogColors.RESET}"
+        return super().format(target_record)
 
 
 class LoggerConfig:
@@ -99,9 +102,16 @@ class LoggerConfig:
     def set_level(self, level: int) -> None:
         """设置全局日志级别"""
         self.level = level
-        # 更新所有已创建的logger
+        # 更新root logger
+        logging.root.setLevel(level)
         for handler in logging.root.handlers:
             handler.setLevel(level)
+        # 更新所有已创建的命名logger
+        for logger_obj in logging.Logger.manager.loggerDict.values():
+            if isinstance(logger_obj, logging.Logger):
+                logger_obj.setLevel(level)
+                for handler in logger_obj.handlers:
+                    handler.setLevel(level)
 
 
 @lru_cache(maxsize=32)
@@ -128,7 +138,8 @@ def get_logger(name: str) -> logging.Logger:
         return logger
 
     logger.setLevel(config.level)
-    logger.propagate = False
+    # 允许传播到root，便于pytest caplog等外部日志捕获
+    logger.propagate = True
 
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)

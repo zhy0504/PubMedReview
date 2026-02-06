@@ -44,9 +44,10 @@ class SecretsManager:
     API配置安全管理器
 
     优先级顺序:
-    1. 环境变量
-    2. 配置文件
-    3. 运行时设置
+    1. 运行时设置
+    2. 调用方传入参数
+    3. 环境变量
+    4. 默认值（仅 URL/模型）
 
     Example:
         manager = SecretsManager()
@@ -91,7 +92,7 @@ class SecretsManager:
         "gemini": ServiceConfig(
             name="Google Gemini",
             key_prefix="AIzaSy",
-            key_pattern=r"^AIzaSy[a-zA-Z0-9_-]{33}$",
+            key_pattern=r"^AIzaSy[a-zA-Z0-9_-]{20,}$",
             key_env_var="GEMINI_API_KEY",
             url_env_var="GEMINI_BASE_URL",
             model_env_var="GEMINI_MODEL",
@@ -138,8 +139,12 @@ class SecretsManager:
     PLACEHOLDER_KEYS = {
         "sk-your_openai_api_key_here",
         "sk-your_api_key_here",
+        "sk-your_key_here",
+        "sk-your_proxy_key_here",
         "AIzaSy_your_gemini_api_key_here",
+        "AIzaSy_your_key_here",
         "sk-your_deepseek_api_key",
+        "sk-your_moonshot_api_key_here",
         "sk-your_moonshot_api_key",
         "your-api-key-here",
         "YOUR_API_KEY",
@@ -171,16 +176,16 @@ class SecretsManager:
         if service in self._runtime_keys:
             return self._runtime_keys[service]
 
-        # 2. 环境变量
+        # 2. 调用方传入配置
+        if config_key and not self.is_placeholder(config_key):
+            return config_key
+
+        # 3. 环境变量
         config = self.SERVICE_CONFIGS.get(service)
         if config:
             env_key = os.environ.get(config.key_env_var)
             if env_key and not self.is_placeholder(env_key):
                 return env_key
-
-        # 3. 配置文件中的密钥
-        if config_key and not self.is_placeholder(config_key):
-            return config_key
 
         return None
 
@@ -203,16 +208,16 @@ class SecretsManager:
         if service in self._runtime_urls:
             return self._runtime_urls[service]
 
-        # 2. 环境变量
+        # 2. 调用方传入配置
+        if config_url:
+            return config_url
+
+        # 3. 环境变量
         config = self.SERVICE_CONFIGS.get(service)
         if config:
             env_url = os.environ.get(config.url_env_var)
             if env_url:
                 return env_url
-
-        # 3. 配置文件
-        if config_url:
-            return config_url
 
         # 4. 默认值
         if config:
@@ -239,16 +244,16 @@ class SecretsManager:
         if service in self._runtime_models:
             return self._runtime_models[service]
 
-        # 2. 环境变量
+        # 2. 调用方传入配置
+        if config_model:
+            return config_model
+
+        # 3. 环境变量
         config = self.SERVICE_CONFIGS.get(service)
         if config:
             env_model = os.environ.get(config.model_env_var)
             if env_model:
                 return env_model
-
-        # 3. 配置文件
-        if config_model:
-            return config_model
 
         # 4. 默认值
         if config:

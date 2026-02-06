@@ -362,7 +362,8 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         """安装特定包"""
         try:
             print(f"正在安装 {package_name}...")
-            cmd = [sys.executable, "-m", "pip", "install", package_name]
+            python_exe = self._get_preferred_python()
+            cmd = [python_exe, "-m", "pip", "install", package_name]
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             print(f"{package_name} 安装成功")
             self._log_action("安装包", {"package": package_name})
@@ -373,7 +374,8 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         """创建requirements.txt文件"""
         try:
             print("正在生成requirements.txt...")
-            cmd = [sys.executable, "-m", "pip", "freeze"]
+            python_exe = self._get_preferred_python()
+            cmd = [python_exe, "-m", "pip", "freeze"]
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             
             with open(self.requirements_file, 'w', encoding='utf-8') as f:
@@ -486,7 +488,9 @@ class AdvancedCLI(IntelligentLiteratureCLI):
         
         # 导入AI客户端
         try:
-            sys.path.insert(0, str(self.project_root / "src"))
+            src_path = str(self.project_root / "src")
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
             from ai_client import AIConfig, OpenAIAdapter, GeminiAdapter
         except ImportError as e:
             print(f"无法导入AI客户端: {e}")

@@ -1135,6 +1135,17 @@ class ConfigManager:
 
     def load_config(self):
         """从环境变量加载配置"""
+        # 每次重载前清理旧状态，避免服务已删除但残留在内存中
+        self.configs = {}
+        self.default_service = None
+
+        # 刷新底层配置管理器，读取最新环境变量
+        if hasattr(self._ai_config, "reload"):
+            try:
+                self._ai_config.reload()
+            except Exception:
+                pass
+
         # 转换新格式配置到旧格式
         for service in self._ai_config.list_valid_services():
             config = AIConfig(
@@ -1765,6 +1776,9 @@ class AIClient:
                         print(f"测试连接时出错: {e}")
             
             elif choice == '5':
+                self.print_performance_report()
+            
+            elif choice == '6':
                 print("再见!")
                 break
             

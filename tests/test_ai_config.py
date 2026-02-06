@@ -6,7 +6,15 @@ AI配置模块单元测试
 import os
 import pytest
 
-from ai_config import AIConfigManager, AIServiceConfig, get_ai_config
+from ai_config import AIConfigManager, AIServiceConfig, get_ai_config, reset_ai_config_cache
+
+
+@pytest.fixture(autouse=True)
+def reset_ai_config_singleton():
+    """每个测试前后重置全局配置缓存，避免单例状态串扰。"""
+    reset_ai_config_cache()
+    yield
+    reset_ai_config_cache()
 
 
 class TestAIServiceConfig:
@@ -94,6 +102,15 @@ class TestAIConfigManager:
         result = config.set_active_service("openai")
         # 不断言结果，因为取决于环境配置
 
+    def test_reload_preserves_active_service(self):
+        """测试reload默认保留当前活动服务。"""
+        config = get_ai_config()
+        config.set_active_service("gemini")
+        config.reload(reload_env=False)
+        active = config.get_active_service()
+        assert active is not None
+        assert active.name == "gemini"
+
     def test_get_config_compatibility(self):
         """测试兼容性API"""
         config = get_ai_config()
@@ -122,3 +139,33 @@ class TestEnvironmentVariables:
         """测试从环境变量读取默认服务"""
         monkeypatch.setenv("DEFAULT_AI_SERVICE", "gemini")
         # 同样的单例限制
+
+    def test_force_reload_reflects_latest_env(self, monkeypatch):
+        """测试force_reload会重新读取最新环境变量。"""
+        monkeypatch.setenv("OPENAI_MODEL", "model-v1")
+        config = get_ai_config(force_reload=True)
+        assert config.get_service("openai").model == "model-v1"
+
+        monkeypatch.setenv("OPENAI_MODEL", "model-v2")
+        config = get_ai_config(force_reload=True)
+        assert config.get_service("openai").model == "model-v2"
+
+    def test_invalid_integer_env_values_fallback_to_defaults(self, monkeypatch):
+        """测试非法整型环境变量不会导致崩溃，并回退默认值。"""
+        monkeypatch.setenv("OPENAI_TIMEOUT", "not_an_int")
+        monkeypatch.setenv("AI_REQUEST_TIMEOUT", "bad")
+        monkeypatch.setenv("AI_MAX_RETRIES", "-10")
+
+        config = get_ai_config(force_reload=True)
+        service = config.get_service("openai")
+
+        assert service.timeout == 300
+        assert config.get_setting("request_timeout") == 300
+        assert config.get_setting("max_retries") == 3
+
+    def test_reset_cache_creates_new_instance(self):
+        """测试重置缓存后会得到新实例。"""
+        config1 = get_ai_config()
+        reset_ai_config_cache()
+        config2 = get_ai_config()
+        assert config1 is not config2

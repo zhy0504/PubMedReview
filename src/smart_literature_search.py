@@ -119,6 +119,11 @@ class SmartLiteratureSearchSystem:
         if not self.data_ready:
             print("系统未初始化，请先运行 initialize_system()")
             return None
+
+        # 防御式检查：避免在组件未就绪时进入主流程导致异常中断
+        if not self.intent_analyzer or not self.pubmed_searcher or not self.literature_filter:
+            print("系统组件未正确初始化，请重新执行 initialize_system()")
+            return None
         
         print(f"[FIND] 开始智能文献检索")
         print(f"用户需求: {user_input}")
@@ -136,7 +141,11 @@ class SmartLiteratureSearchSystem:
         
         # 步骤2: 构建检索词并搜索
         print("\n[SEARCH] 步骤2: 执行PubMed检索...")
-        query = self.intent_analyzer.build_pubmed_query(criteria)
+        try:
+            query = self.intent_analyzer.build_pubmed_query(criteria)
+        except Exception as e:
+            print(f"检索词构建失败: {e}")
+            query = getattr(criteria, "query", "") or user_input
         print(f"最终检索词: {query}")
         
         try:

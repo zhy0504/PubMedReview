@@ -113,6 +113,30 @@ class SystemCache:
             self.environment_cache.unlink()
 
 
+def is_interactive_terminal() -> bool:
+    """检测当前是否为可交互终端。"""
+    stdin = getattr(sys, "stdin", None)
+    return bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
+
+
+def prompt_yes_no(message: str, default: bool = True) -> bool:
+    """
+    安全的Y/N提示。
+    在非交互环境或读取输入失败时，返回默认值。
+    """
+    if not is_interactive_terminal():
+        return default
+
+    try:
+        choice = input(message).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return default
+
+    if not choice:
+        return default
+    return choice in {"y", "yes"}
+
+
 def print_status(message, status="INFO", show_time: bool = True):
     """状态信息打印"""
     prefix = {
@@ -279,6 +303,11 @@ def check_dependencies(progress_tracker: ProgressTracker = None, system_cache: S
         error_msg = "requirements.txt文件不存在"
         solution = "请确保项目根目录包含requirements.txt文件"
         raise EnvironmentError("依赖包", "配置文件缺失", error_msg, solution)
+
+    if not venv_python.exists():
+        error_msg = f"虚拟环境Python不存在: {venv_python}"
+        solution = "请先完成虚拟环境检查/创建，再执行依赖安装"
+        raise EnvironmentError("依赖包", "虚拟环境缺失", error_msg, solution)
     
     # 检查PowerShell缓存决定
     ps_cache_used = os.environ.get('PS_CACHE_USED', '').lower() == 'true'
@@ -356,7 +385,7 @@ if missing:
 else:
     print(f'+ 所有依赖包检查完成 ({len(required_packages)}/{len(required_packages)})')
 """
-        ], capture_output=True, text=True, check=False, timeout=60)
+        ], capture_output=True, text=True, check=False, timeout=60, cwd=str(base_dir))
         
         if result.stdout:
             print(result.stdout)
@@ -393,6 +422,11 @@ def install_dependencies(system_cache: SystemCache = None) -> bool:
     print_status("安装依赖包...")
     
     try:
+        if not venv_python.exists() or not venv_pip.exists():
+            error_msg = f"虚拟环境未就绪: {venv_python} / {venv_pip}"
+            solution = "请先执行虚拟环境创建（python -m venv venv）后重试"
+            raise EnvironmentError("依赖包", "虚拟环境缺失", error_msg, solution)
+
         # 升级pip
         print_status("升级pip...")
         subprocess.run([
@@ -684,20 +718,8 @@ def parallel_environment_checks(force_check: bool = False) -> Dict[str, bool]:
             else:
                 print(f"发现环境检查缓存 (时间: {cache_time[:19]})")
                 
-                try:
-                    choice = input("是否使用缓存结果？(Y/n): ").strip().lower()
-                    if choice in ['', 'y', 'yes']:
-                        print_status("使用缓存的环境检查结果", "INFO")
-                        return {
-                            "Python版本": True,
-                            "虚拟环境": True,
-                            "依赖包": True,
-                            "数据文件": True,
-                            "核心程序": True
-                        }
-                    else:
-                        print_status("重新执行环境检查", "INFO")
-                except (EOFError, KeyboardInterrupt):
+                use_cache = prompt_yes_no("是否使用缓存结果？(Y/n): ", default=True)
+                if use_cache:
                     print_status("使用缓存的环境检查结果", "INFO")
                     return {
                         "Python版本": True,
@@ -706,6 +728,7 @@ def parallel_environment_checks(force_check: bool = False) -> Dict[str, bool]:
                         "数据文件": True,
                         "核心程序": True
                     }
+                print_status("重新执行环境检查", "INFO")
     
     # 使用线程池并行执行检查（不使用共享进度跟踪器）
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -798,10 +821,11 @@ def start_literature_system():
             print_status("您可以手动安装Pandoc或稍后重试", "INFO")
     
     try:
-        base_dir, _, _, _ = get_venv_paths()
+        base_dir, _, venv_python, _ = get_venv_paths()
+        python_executable = str(venv_python) if venv_python.exists() else sys.executable
         
         # 构建启动命令
-        cmd = [sys.executable, str(base_dir / "src" / "intelligent_literature_system.py")]
+        cmd = [python_executable, str(base_dir / "src" / "intelligent_literature_system.py")]
         
         # 如果有高级CLI，获取AI配置
         if HAS_ADVANCED_CLI:
@@ -976,10 +1000,7 @@ def main():
     parser.add_argument("--force-check", action="store_true", help="强制重新检查（忽略缓存）")
     parser.add_argument("--help", "-h", action="store_true", help="显示帮助")
     
-    try:
-        args = parser.parse_args()
-    except SystemExit:
-        args = argparse.Namespace(command=None, check_only=False, force_check=False, help=False)
+    args = parser.parse_args()
     
     # 打印启动横幅（如果没有被PowerShell脚本禁用）
     skip_banner = os.environ.get('PS_SKIP_BANNER', '').lower() == 'true'
@@ -1064,9 +1085,17 @@ def main():
             print_status("检测到环境问题，建议先解决问题再启动系统", "WARNING")
     
     # 显示快速菜单
+    if not is_interactive_terminal():
+        print_status("检测到非交互终端，跳过菜单模式。请使用 start/status/check 命令。", "INFO")
+        return
+
     while True:
         show_quick_menu()
-        choice = input("\n请选择操作: ").strip()
+        try:
+            choice = input("\n请选择操作: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print_status("检测到输入结束，退出菜单。", "INFO")
+            break
         
         if choice == "1":
             if HAS_ADVANCED_CLI:

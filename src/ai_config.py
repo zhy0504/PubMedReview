@@ -180,6 +180,18 @@ class AIConfigManager:
 
         self._initialized = True
 
+    @staticmethod
+    def _safe_int(value: Any, default: int, min_value: Optional[int] = None) -> int:
+        """安全解析整数环境变量，异常或越界时回退默认值。"""
+        try:
+            parsed = int(str(value).strip())
+        except (TypeError, ValueError):
+            return default
+
+        if min_value is not None and parsed < min_value:
+            return default
+        return parsed
+
     def _load_dotenv(self):
         """加载 .env 文件"""
         # 查找 .env 文件
@@ -214,6 +226,7 @@ class AIConfigManager:
 
     def _load_services(self):
         """从环境变量加载所有服务配置"""
+        self._services.clear()
         for service_name, (prefix, api_type) in self.SERVICE_PREFIXES.items():
             config = self._load_service_config(service_name, prefix, api_type)
             if config:
@@ -235,7 +248,7 @@ class AIConfigManager:
         api_key = os.environ.get(f"{prefix}_API_KEY", "")
         base_url = os.environ.get(f"{prefix}_BASE_URL", defaults.get("base_url", ""))
         model = os.environ.get(f"{prefix}_MODEL", defaults.get("model", ""))
-        timeout = int(os.environ.get(f"{prefix}_TIMEOUT", "300"))
+        timeout = self._safe_int(os.environ.get(f"{prefix}_TIMEOUT", "300"), default=300, min_value=1)
         status = os.environ.get(f"{prefix}_STATUS", "active" if api_key else "inactive")
 
         # 检查是否为占位符
@@ -256,11 +269,27 @@ class AIConfigManager:
     def _load_settings(self):
         """加载通用设置"""
         self._settings = {
-            "request_timeout": int(os.environ.get("AI_REQUEST_TIMEOUT", "300")),
-            "max_retries": int(os.environ.get("AI_MAX_RETRIES", "3")),
+            "request_timeout": self._safe_int(
+                os.environ.get("AI_REQUEST_TIMEOUT", "300"), default=300, min_value=1
+            ),
+            "max_retries": self._safe_int(
+                os.environ.get("AI_MAX_RETRIES", "3"), default=3, min_value=0
+            ),
             "enable_streaming": os.environ.get("AI_ENABLE_STREAMING", "true").lower() == "true",
             "allow_service_switch": os.environ.get("AI_ALLOW_SERVICE_SWITCH", "true").lower() == "true",
         }
+
+    def reload(self, reload_env: bool = True, preserve_active_service: bool = True) -> None:
+        """重新从环境变量加载配置。"""
+        previous_active = self._active_service if preserve_active_service else None
+
+        if reload_env:
+            self._load_dotenv()
+        self._load_services()
+        self._load_settings()
+
+        if preserve_active_service and previous_active in self._services:
+            self._active_service = previous_active
 
     def _is_placeholder(self, key: str) -> bool:
         """检查是否为占位符"""
@@ -385,17 +414,31 @@ class AIConfigManager:
             return "[占位符]"
         return f"{key[:7]}****{key[-4:]}"
 
+    @classmethod
+    def reset_instance(cls) -> None:
+        """重置单例（用于测试或需要彻底重载的场景）。"""
+        cls._instance = None
+
 
 # 全局单例
 _ai_config: Optional[AIConfigManager] = None
 
 
-def get_ai_config() -> AIConfigManager:
+def get_ai_config(force_reload: bool = False) -> AIConfigManager:
     """获取AI配置管理器实例"""
     global _ai_config
     if _ai_config is None:
         _ai_config = AIConfigManager()
+    elif force_reload:
+        _ai_config.reload()
     return _ai_config
+
+
+def reset_ai_config_cache() -> None:
+    """重置全局AI配置缓存（主要用于测试）。"""
+    global _ai_config
+    _ai_config = None
+    AIConfigManager.reset_instance()
 
 
 # 兼容性函数
@@ -413,5 +456,6 @@ __all__ = [
     'AIConfigManager',
     'AIServiceConfig',
     'get_ai_config',
+    'reset_ai_config_cache',
     'load_ai_config',
 ]
