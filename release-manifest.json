@@ -17,7 +17,7 @@
   },
   {
     "path": "README.md",
-    "sha256": "478443704c05f0019933d812708b2cb2491f4f27bbde2ba1dd963d07b3630b12"
+    "sha256": "140289da699b98ac047d841395a27c0ba7e5d98d69624f4b796429201d86b631"
   },
   {
     "path": "data/FQBJCR2025-UTF8.csv",
@@ -329,7 +329,7 @@
   },
   {
     "path": "tools/WorkbenchTray.cs",
-    "sha256": "e346091a648dd4b6db0a1948d66b119950a0d5bea24143b5fbae5cfc4e715f77"
+    "sha256": "8bccfbdd243f506c8045fde2fe7d1f70f30d47229de5ea3c0dd1ce024454b0eb"
   },
   {
     "path": "tools/build-tray.ps1",
@@ -345,7 +345,7 @@
   },
   {
     "path": "tools/prepare_release.py",
-    "sha256": "a53278f2593e42f0bded458dcf6b0c89c1ca11ba4e5ce8ab76ce7c086b193baa"
+    "sha256": "2fc74b67205396f4b888ea768a2091c64c22988348388809a7e007dd9a126893"
   },
   {
     "path": "tools/select_package_indexes.py",
@@ -354,5 +354,9 @@
   {
     "path": "tools/workbench.ico",
     "sha256": "cd614eba75f95509f7964e3a978170b72773e244c0405ce387c413dab64dadac"
+  },
+  {
+    "path": "文献综述工作台.exe",
+    "sha256": "e939cadf01c3f88e7df8bb5ae9cb31627318fd12ee1b8dabe42d3b50008c2fbf"
   }
 ]

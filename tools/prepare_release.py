@@ -15,7 +15,8 @@ def prepare(root, destination):
         raise ValueError('Destination must be a new directory inside the project')
     roots = ('README.md', 'LICENSE', '.gitignore', '.gitattributes', '.env.example', 'requirements.txt',
              'pytest.ini', 'system_config.yaml', 'start.ps1', 'start.sh', 'start for win11.bat',
-             'docs/tray-launcher.md', 'docs/release-audit.md', 'prompts/prompts_config.yaml')
+             'docs/tray-launcher.md', 'docs/release-audit.md', 'prompts/prompts_config.yaml',
+             '文献综述工作台.exe')
     files = [root / name for name in roots]
     for directory in ('src', 'tests'):
         files.extend(path for path in (root / directory).rglob('*') if path.is_file()

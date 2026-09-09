@@ -22,11 +22,17 @@
 
 双击 `start for win11.bat`。脚本在项目中创建 `.venv`，检查 requirements.txt 中的依赖和版本；满足要求时不重复下载，缺失时按镜像响应时间排序尝试安装。
 
-可选托盘启动器：在 PowerShell 执行以下命令构建，再双击项目根目录生成的 EXE：
+仓库已提供 `文献综述工作台.exe`，下载整个项目后可直接双击，最小化到系统托盘。EXE 不是独立安装包，必须与 `start.ps1`、`src/`、`tools/` 等文件放在一起，仍需安装 Python。
+
+如需自行构建，在项目根目录打开 PowerShell 执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tray.ps1
 ```
+
+构建脚本使用 Windows .NET Framework 的 C# 编译器（`Framework64/v4.0.30319/csc.exe`），将 `tools/WorkbenchTray.cs` 编译为根目录的 EXE，并嵌入 `tools/workbench.ico`。无需额外安装打包工具；需要本机存在该编译器。构建会覆盖同名 EXE，请先退出运行中的启动器。
+
+可用 `文献综述工作台.exe --self-test` 检查进程启动、日志转发和父子进程退出，结果写入 `logs/tray-self-test.txt`。自检不会执行真实文献检索。提供的 EXE 未进行代码签名；如系统给出安全提示，可核对源代码与校验信息或自行构建，不建议关闭系统安全防护。
 
 托盘版的关闭按钮仅隐藏窗口；要停止服务，使用托盘菜单“退出”。具体说明见 `docs/tray-launcher.md`。
 

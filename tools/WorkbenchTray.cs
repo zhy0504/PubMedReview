@@ -103,6 +103,7 @@ sealed class WorkbenchTray : Form {
     void Quit() { if (MessageBox.Show("退出将停止本程序启动的服务及运行中的检索/综述任务，是否继续？", "退出确认", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; quitting = true; Close(); }
     [STAThread] static int Main(string[] args) {
         if (args.Length == 1 && args[0] == "--self-test") {
+            Directory.CreateDirectory(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs"));
             try {
                 int child = 0; var received = new ManualResetEvent(false);
                 var runner = new OwnedProcess(AppDomain.CurrentDomain.BaseDirectory, "$child=Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 60' -PassThru; Write-Output $child.Id; Start-Sleep -Seconds 60", delegate(string line) { int value; if (int.TryParse(line, out value)) { child = value; received.Set(); } });
