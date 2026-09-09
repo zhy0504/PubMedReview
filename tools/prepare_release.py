@@ -13,7 +13,7 @@ def prepare(root, destination):
     destination = Path(destination).resolve()
     if root not in destination.parents or destination.exists():
         raise ValueError('Destination must be a new directory inside the project')
-    roots = ('README.md', 'LICENSE', '.gitignore', '.env.example', 'requirements.txt',
+    roots = ('README.md', 'LICENSE', '.gitignore', '.gitattributes', '.env.example', 'requirements.txt',
              'pytest.ini', 'system_config.yaml', 'start.ps1', 'start.sh', 'start for win11.bat',
              'docs/tray-launcher.md', 'docs/release-audit.md', 'prompts/prompts_config.yaml')
     files = [root / name for name in roots]
@@ -24,6 +24,8 @@ def prepare(root, destination):
     tools = ('WorkbenchTray.cs', 'build-tray.ps1', 'make-icon.ps1', 'workbench.ico',
              'select_package_indexes.py', 'check_dependencies.py', 'prepare_release.py')
     files.extend(root / 'tools' / name for name in tools)
+    files.extend(root / 'data' / name for name in ('README.md', 'checksums.json',
+                 'FQBJCR2025-UTF8.csv', 'JCR2025-UTF8.csv', 'XR2026-UTF8.csv'))
     secrets = []
     env = root / '.env'
     if env.exists():
@@ -46,8 +48,6 @@ def prepare(root, destination):
         target = destination / record['path']
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / record['path'], target)
-    (destination / 'data').mkdir()
-    (destination / 'data/README.md').write_text('请放入有权使用的 FQBJCR2025-UTF8.csv、JCR2025-UTF8.csv、XR2026-UTF8.csv。源代码发布候选不包含第三方期刊数据。\n', encoding='utf-8')
     (destination / 'release-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'Prepared {len(manifest)} files; local credential comparison passed.')
 

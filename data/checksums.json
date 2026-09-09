@@ -1,0 +1,20 @@
+[
+  {
+    "file": "FQBJCR2025-UTF8.csv",
+    "records": 21772,
+    "bytes": 3982738,
+    "sha256": "481224dca2cacc1cce49afb44c968d734c834e498e5ff054f15efb5a548789fc"
+  },
+  {
+    "file": "JCR2025-UTF8.csv",
+    "records": 22643,
+    "bytes": 2735506,
+    "sha256": "e9a0402f505264a796615bcec697f843af08dbce023ce67164c0f6f4709207c4"
+  },
+  {
+    "file": "XR2026-UTF8.csv",
+    "records": 22299,
+    "bytes": 6071512,
+    "sha256": "8bffe4bdcae8f710c756e0138d93219bb53555eae23827c20287bc9200a027e6"
+  }
+]

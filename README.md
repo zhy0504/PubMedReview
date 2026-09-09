@@ -52,7 +52,11 @@ bash start.sh
 
 程序只检测文件是否存在，不自动更新期刊表。多项分区条件按交集筛选；“3区及以上”表示1–3区。指定分区后，缺少该分区数据的期刊不会入选。期刊影响因子不代表单篇文章质量。
 
-这些 CSV 来源于此前使用的 ShowJCR 数据快照，不属于本项目原创数据。对外分发前须核实数据许可；源代码发布准备目录默认不包含期刊数据，需自行放入有权使用的文件。
+三份 CSV 已内置于 `data/`，直接来源于 [hitfyd/ShowJCR](https://github.com/hitfyd/ShowJCR) 的[原始数据目录](https://github.com/hitfyd/ShowJCR/tree/master/中科院分区表及JCR原始数据文件)。本次收录的是本地已使用的数据快照（2026-09-09），未修改 CSV 内容，不代表自动同步上游最新版本。
+
+根据 ShowJCR 的来源说明，中科院分区数据来自[中科院分区表平台](https://advanced.fenqubiao.com/)，新锐分区来自[新锐学术](https://www.xr-scholar.com/)，JCR 文件用于提供期刊影响因子与分区。感谢上游项目整理与提供数据。各文件的记录数和 SHA-256 见 `data/README.md`。
+
+这些数据不是本项目原创内容，本项目代码的 MIT 许可证不意味着为第三方数据授予 MIT 许可。[ShowJCR 仓库许可证](https://github.com/hitfyd/ShowJCR/blob/master/LICENSE)及原始数据提供方的使用条款须分别遵守；注明来源不等同于取得额外的数据使用或再分发授权。
 
 ## 文件与隐私
 

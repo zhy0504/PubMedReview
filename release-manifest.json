@@ -4,20 +4,48 @@
     "sha256": "68df4698f0676e1147f74dddbf23935c585b22b64f135c4a7b50f6dd60d255e5"
   },
   {
+    "path": ".gitattributes",
+    "sha256": "260e164baa7856fac85eb753a33fddb64b022e2f464282956069971ca16b4d7e"
+  },
+  {
     "path": ".gitignore",
     "sha256": "a4d829bdfd1c86744ac9da3d042f4df221b93fd321b917124822674e9942ded0"
   },
   {
+    "path": "LICENSE",
+    "sha256": "64a17e5c14680c718cc460e1ece50444129d98d97ffcc64240b4d06143669ca6"
+  },
+  {
+    "path": "README.md",
+    "sha256": "169986a569939daa087122ba611dfc382a1af1c369f486a714d75fd9b363de07"
+  },
+  {
+    "path": "data/FQBJCR2025-UTF8.csv",
+    "sha256": "481224dca2cacc1cce49afb44c968d734c834e498e5ff054f15efb5a548789fc"
+  },
+  {
+    "path": "data/JCR2025-UTF8.csv",
+    "sha256": "e9a0402f505264a796615bcec697f843af08dbce023ce67164c0f6f4709207c4"
+  },
+  {
+    "path": "data/README.md",
+    "sha256": "69b2e72316a7973147a12c408a6f89f709465a1da055c2e8bd0cb2ace0e6a26a"
+  },
+  {
+    "path": "data/XR2026-UTF8.csv",
+    "sha256": "8bffe4bdcae8f710c756e0138d93219bb53555eae23827c20287bc9200a027e6"
+  },
+  {
+    "path": "data/checksums.json",
+    "sha256": "27a554ac9590f6e167529209e6b3be7773f694f1c0f73f23e58a0564ee9821c1"
+  },
+  {
     "path": "docs/release-audit.md",
-    "sha256": "146a0c2add8cfa9e77031123093e2363d8971f05566cd6066a71c1eed8cb9849"
+    "sha256": "e2262575145a4fe42b5240ff77811f44065e7b0f8957edb5a22378cfd4184023"
   },
   {
     "path": "docs/tray-launcher.md",
     "sha256": "56038453533a87e468b8c6c489d008643fc4dcd94f137dbe9785851e16cfe0c7"
-  },
-  {
-    "path": "LICENSE",
-    "sha256": "64a17e5c14680c718cc460e1ece50444129d98d97ffcc64240b4d06143669ca6"
   },
   {
     "path": "prompts/prompts_config.yaml",
@@ -26,10 +54,6 @@
   {
     "path": "pytest.ini",
     "sha256": "ddf887d6bb9198064bfaf22d9317807bffe43f8f3ae4a57d07230c8910cd128d"
-  },
-  {
-    "path": "README.md",
-    "sha256": "4578120c88e93cc5b30e99873f529697794f8bb3a08b96aa23df7649989de2b6"
   },
   {
     "path": "requirements.txt",
@@ -300,6 +324,10 @@
     "sha256": "90c675dccabc06633c5bc982dbfa5b28b56a2e33695a762df59b972fee19d66e"
   },
   {
+    "path": "tools/WorkbenchTray.cs",
+    "sha256": "e346091a648dd4b6db0a1948d66b119950a0d5bea24143b5fbae5cfc4e715f77"
+  },
+  {
     "path": "tools/build-tray.ps1",
     "sha256": "d872dc119d885a0728209424778208a97a4497610bc3ca2e095b80cce5f76a23"
   },
@@ -313,7 +341,7 @@
   },
   {
     "path": "tools/prepare_release.py",
-    "sha256": "776d6eb41c504ec56c3dc4b980303e73cbdf714222afb0554c6b35a2fd8522ad"
+    "sha256": "a53278f2593e42f0bded458dcf6b0c89c1ca11ba4e5ce8ab76ce7c086b193baa"
   },
   {
     "path": "tools/select_package_indexes.py",
@@ -322,9 +350,5 @@
   {
     "path": "tools/workbench.ico",
     "sha256": "cd614eba75f95509f7964e3a978170b72773e244c0405ce387c413dab64dadac"
-  },
-  {
-    "path": "tools/WorkbenchTray.cs",
-    "sha256": "e346091a648dd4b6db0a1948d66b119950a0d5bea24143b5fbae5cfc4e715f77"
   }
 ]
