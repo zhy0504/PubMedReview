@@ -17,7 +17,7 @@
   },
   {
     "path": "README.md",
-    "sha256": "169986a569939daa087122ba611dfc382a1af1c369f486a714d75fd9b363de07"
+    "sha256": "478443704c05f0019933d812708b2cb2491f4f27bbde2ba1dd963d07b3630b12"
   },
   {
     "path": "data/FQBJCR2025-UTF8.csv",
@@ -229,7 +229,7 @@
   },
   {
     "path": "system_config.yaml",
-    "sha256": "c01970dcab4bb7a8e6364967b765d0659492eec452ecc200ab94b8286baf7d6b"
+    "sha256": "c69cd2a94be5147d2a29bccf68374067f3d0639b2936de8d2a2e514f11a98909"
   },
   {
     "path": "tests/__init__.py",
@@ -302,6 +302,10 @@
   {
     "path": "tests/test_smart_literature_search_flow.py",
     "sha256": "7226b8307827053f0269e7a883e9631fdd276de769c4cb13345d4c66d44c964a"
+  },
+  {
+    "path": "tests/test_system_config.py",
+    "sha256": "10972d78bde290b5b109337a0f87cda826d3d5c84ffb8ff723ae27b32694ffad"
   },
   {
     "path": "tests/test_workbench_app.py",

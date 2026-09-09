@@ -60,6 +60,8 @@ bash start.sh
 
 ## 文件与隐私
 
+`system_config.yaml` 仅保留三个系统默认项：`ai.preferred_model`（初始化后备模型）、`export.review_format`（后备输出格式）及 `export.medical_template`（可选模板路径）。任务运行时优先使用 Web 中设置的模型和输出格式。密钥、接口和思考强度不在此文件配置。此前未接入的批处理、日志、PubMed、分区等参数，以及与代码默认值重复的配置已移除；清理不改变现有运行默认值。
+
 - `src/`：核心处理与 Web 工作台。
 - `prompts/`：三个模块的提示词。
 - `tools/`：启动检查、镜像选择与 Windows 托盘构建工具。
