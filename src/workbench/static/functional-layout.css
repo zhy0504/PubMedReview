@@ -1,0 +1,34 @@
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.artifacts {
+  margin-top: 0;
+}
+
+.settings-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.right-rail {
+  align-self: start;
+}
+
+.advanced summary,
+.form-footer > span {
+  font-size: 15px;
+  color: #314b40;
+  font-weight: 650;
+  line-height: 1.7;
+}
+
+.form-footer {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .right-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.inline-fields{display:flex;align-items:center;gap:.5rem}.inline-fields input{min-width:0;flex:1}

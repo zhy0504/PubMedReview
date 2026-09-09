@@ -1,0 +1,330 @@
+[
+  {
+    "path": ".env.example",
+    "sha256": "68df4698f0676e1147f74dddbf23935c585b22b64f135c4a7b50f6dd60d255e5"
+  },
+  {
+    "path": ".gitignore",
+    "sha256": "a4d829bdfd1c86744ac9da3d042f4df221b93fd321b917124822674e9942ded0"
+  },
+  {
+    "path": "docs/release-audit.md",
+    "sha256": "146a0c2add8cfa9e77031123093e2363d8971f05566cd6066a71c1eed8cb9849"
+  },
+  {
+    "path": "docs/tray-launcher.md",
+    "sha256": "56038453533a87e468b8c6c489d008643fc4dcd94f137dbe9785851e16cfe0c7"
+  },
+  {
+    "path": "LICENSE",
+    "sha256": "64a17e5c14680c718cc460e1ece50444129d98d97ffcc64240b4d06143669ca6"
+  },
+  {
+    "path": "prompts/prompts_config.yaml",
+    "sha256": "90902155d7b95c0945c93f42b4f8e8a70ad727e4555e8bbbc2a5e3a077b8409a"
+  },
+  {
+    "path": "pytest.ini",
+    "sha256": "ddf887d6bb9198064bfaf22d9317807bffe43f8f3ae4a57d07230c8910cd128d"
+  },
+  {
+    "path": "README.md",
+    "sha256": "4578120c88e93cc5b30e99873f529697794f8bb3a08b96aa23df7649989de2b6"
+  },
+  {
+    "path": "requirements.txt",
+    "sha256": "c920d9b59e56a2a6f8f9cf5ca93c78707b0874ed89a2460d9e6240514f9e5c6d"
+  },
+  {
+    "path": "src/__init__.py",
+    "sha256": "b0ba32370da9d379728354a3f231bbe6ef6f1bc65ebefa5879a373ef0490dabd"
+  },
+  {
+    "path": "src/advanced_cli.py",
+    "sha256": "b31712c0ec10b710d52cfaf69cf5fc65f4dd7f9b193a7ca0f37577138c9765e5"
+  },
+  {
+    "path": "src/ai_client.py",
+    "sha256": "30bc7b70d3942102bf2b8e9d6635b9ab5ffa89c192853e00ca5b6803a47e2c88"
+  },
+  {
+    "path": "src/ai_config.py",
+    "sha256": "08383fc19efee9b4ccf0a09e174abb1ea1c64c2b88cb25af5dd505bd09595f4a"
+  },
+  {
+    "path": "src/cache.py",
+    "sha256": "3f848900ea7b87f22b87c77a82c570de9f044f95f0b9707a8f0834dd410dccfc"
+  },
+  {
+    "path": "src/cli.py",
+    "sha256": "b31712c0ec10b710d52cfaf69cf5fc65f4dd7f9b193a7ca0f37577138c9765e5"
+  },
+  {
+    "path": "src/data_processor.py",
+    "sha256": "5e8f2963a28221effc29af743c570610dc69dbb13ddd48ac9952a7189289448d"
+  },
+  {
+    "path": "src/exceptions.py",
+    "sha256": "eb3bdc4b3d10c9f35eec6f98880734abc69ac7c9b3283c4cfa209170448d8764"
+  },
+  {
+    "path": "src/intelligent_literature_system.py",
+    "sha256": "a605fc46f430d8eb5bb9ae79e6f01be152726b6ca416605540434ba619857079"
+  },
+  {
+    "path": "src/intent_analyzer.py",
+    "sha256": "3dcd2eec08a92b8ee04e5d48d96a446244424885275a9e7ef1a3e6c7b3d25281"
+  },
+  {
+    "path": "src/journal_data.py",
+    "sha256": "03dffe5b2819968c795ad9e3324de5136053109d8ca79bb5a4df3d6e4b80860f"
+  },
+  {
+    "path": "src/journal_update.py",
+    "sha256": "c9dd301707796c5e7973d96e0530eed03ed4fe089fc35ffcee3e6c8d0130867d"
+  },
+  {
+    "path": "src/literature_filter.py",
+    "sha256": "bc61bd6f3bb421d0012de2fc091cebb5768bdf4f05209eb3d54c686f32d8093e"
+  },
+  {
+    "path": "src/logger.py",
+    "sha256": "620cf9e94a69e7b6b6509997573ed0ccf6afc90678582fca0c8f59b978aae51c"
+  },
+  {
+    "path": "src/medical_review_generator.py",
+    "sha256": "c92171ce285a4c0e159ed73b2077576b6506dab96e45d11118f0455656be0789"
+  },
+  {
+    "path": "src/openai_protocol.py",
+    "sha256": "68f248ce34f95108aab1b3568731f1f67697b2f12e1e3ee00371751c8604a521"
+  },
+  {
+    "path": "src/prompts_manager.py",
+    "sha256": "95a963fc2ac796f4d85f10e41ba285619c41300e9cdd34daf1fc48464a6ad120"
+  },
+  {
+    "path": "src/pubmed_search.py",
+    "sha256": "9cfa0bc8d96c40e8f37b0b1b52d6cf81754bda380c9b727b515256fc5d4c79c6"
+  },
+  {
+    "path": "src/review_content.py",
+    "sha256": "e83f09c63b49798b258a7453913b4bf68a2f94e18333b94af71d6425118d6f2f"
+  },
+  {
+    "path": "src/review_outline_generator.py",
+    "sha256": "b520cebc7195f2cbc8fda8ac3e9d2510c55f526bf00adc3cf05866a43dfb876f"
+  },
+  {
+    "path": "src/secrets_manager.py",
+    "sha256": "1f5a7138b95e2c519906a36050c48a1817c7479ebfc77e298878c30d099e4dc7"
+  },
+  {
+    "path": "src/setup_pandoc_portable.py",
+    "sha256": "2c6e1b89fc5be1a89bfc444ff3c5d77caa35c3c4f4682f02a19a07acb51f18f2"
+  },
+  {
+    "path": "src/shared_config.py",
+    "sha256": "3767cc38b9267eda0853e6c58ef0e815525016c4d130257046cdb2c749b324ef"
+  },
+  {
+    "path": "src/smart_literature_search.py",
+    "sha256": "9bd7a7589ced4f6953aa534b6a651d7741a35ded15436a80a2327c51c3cce850"
+  },
+  {
+    "path": "src/start.py",
+    "sha256": "f2575f3a02c526338a3c04fe134209542733a0f300644429a332f1b5f70ca3fc"
+  },
+  {
+    "path": "src/web.py",
+    "sha256": "4ed08df8005562eff44adc367c75ce3ecd6fade5ea1b263d7c445f1df4f3df85"
+  },
+  {
+    "path": "src/workbench/__init__.py",
+    "sha256": "babe81daef7d20baf2177fb1a68576d98530b232451ed9639e43fd815aa46442"
+  },
+  {
+    "path": "src/workbench/app.py",
+    "sha256": "c7104b1b2128be446f3362d84ef7ec89505863e7f94f321a0c0dcc9a4772685b"
+  },
+  {
+    "path": "src/workbench/configuration.py",
+    "sha256": "5da35dced56dbd77d488ad8f2cfaab6a6d938760cd76202391ef78fe1f5548e6"
+  },
+  {
+    "path": "src/workbench/jobs.py",
+    "sha256": "f5e171b75044888abfd12c1e52c78856ded218d323a1264ff24cf93daf2ca70f"
+  },
+  {
+    "path": "src/workbench/static/app.css",
+    "sha256": "5cf2d2d440e1495fd330b5c8f3953d3c3fc1895942aba55e11ae6d3df7f50542"
+  },
+  {
+    "path": "src/workbench/static/app.js",
+    "sha256": "cf381d5f2c53f6007bc0857af0f07678f5ce6588505f8096c9fb225f1e69c41a"
+  },
+  {
+    "path": "src/workbench/static/functional-layout.css",
+    "sha256": "6e90b5bbc857921da6e9cf2a9d97f4108cba56f4e95c9e30b0a08a4b9d47a9ac"
+  },
+  {
+    "path": "src/workbench/store.py",
+    "sha256": "7a062076c1b4e76210be54fce1fdfbad04542115e1d1166e6887ced5a5e1266e"
+  },
+  {
+    "path": "src/workbench/templates/index.html",
+    "sha256": "7713247517ae9f52375b9aefb15204dfdb82a8c541a7cd67d0823d6a7d8ecf82"
+  },
+  {
+    "path": "src/workbench/validation.py",
+    "sha256": "dcec081113a5b13bf260fcd025c66233e6640cfd99f71c31ef52a521abc10f2d"
+  },
+  {
+    "path": "src/workbench/worker.py",
+    "sha256": "d13600c381954e409793c90ea101b8b28b909188aafaf8f756b5001bc93be533"
+  },
+  {
+    "path": "src/workflow_exports.py",
+    "sha256": "aaab455bfd07a9dbcbf16ad3effefa371a84f3b741927d6f0c8b9f1fe6295d2e"
+  },
+  {
+    "path": "src/workflow_runtime.py",
+    "sha256": "853c574616af9d913a9d57d6e8e57e51fb68346c83baf285cde896f413894c57"
+  },
+  {
+    "path": "start for win11.bat",
+    "sha256": "e5d9efaba1ca9c773bf3dbd66fdcfe4a36bdebbd389498aed673c29e57b130c0"
+  },
+  {
+    "path": "start.ps1",
+    "sha256": "8c47104d8e98e4ccc95bd7d86b1648304311fb2ad8568d2ded500492a2d81797"
+  },
+  {
+    "path": "start.sh",
+    "sha256": "dd16f301b29c3d6afb7594f31920ce8943645962ef189e801b04217d809b5923"
+  },
+  {
+    "path": "system_config.yaml",
+    "sha256": "c01970dcab4bb7a8e6364967b765d0659492eec452ecc200ab94b8286baf7d6b"
+  },
+  {
+    "path": "tests/__init__.py",
+    "sha256": "dcfa3992a151dbc6d9f8f16365b3dc9caa0513f4a109fe21a3a5fe3d0aa84b5f"
+  },
+  {
+    "path": "tests/conftest.py",
+    "sha256": "65fda0bc254a264778e9c868005c6e4bb76b0131c8a802b7f289eec06548a9b2"
+  },
+  {
+    "path": "tests/test_ai_client_behavior.py",
+    "sha256": "b482bff158def9d842897754fe508209e91209a46e3db7ec8b537c7015040625"
+  },
+  {
+    "path": "tests/test_ai_config.py",
+    "sha256": "ed1d82ea4fb1a5a98220379b2ab11689fc22c2acb2865b0a16902c7981aa8b22"
+  },
+  {
+    "path": "tests/test_cache.py",
+    "sha256": "4deb53f443a4731aa008d7b5206a40de040b71fad7fd2efc6437dd77f20b2ec7"
+  },
+  {
+    "path": "tests/test_citation_hyperlinks.py",
+    "sha256": "5302d3202ebe0a14dd631d1ce527c0181e13426508bec11e65a491f31da1d181"
+  },
+  {
+    "path": "tests/test_dependency_check.py",
+    "sha256": "2a2c31f2d0289836a890de0542586cb7bcfd74dea329cffbb7a2a11e5dc3b32e"
+  },
+  {
+    "path": "tests/test_final_cited_articles.py",
+    "sha256": "659005535ba38ada900dfef1d0b1ae3101be24644a5095924e02e7b21dadf17e"
+  },
+  {
+    "path": "tests/test_intelligent_literature_system_helpers.py",
+    "sha256": "29a41931ae0611f1060d4a24983980317cdbb281f517384f0518459defff68b0"
+  },
+  {
+    "path": "tests/test_journal_partition_mapping.py",
+    "sha256": "679cd51c8f0bb053059e56ba1912ca4d1223428b139223f377a22e9a79607a4d"
+  },
+  {
+    "path": "tests/test_logger.py",
+    "sha256": "f028f3bba6e8d23442dd8df83a653310ad96d678c0da6cf7ec190e12ba7153bb"
+  },
+  {
+    "path": "tests/test_new_rui_filter.py",
+    "sha256": "efd7dc4aa7699567d4781db23c6e5174c933c4f7248287f359f153261ec1bf0e"
+  },
+  {
+    "path": "tests/test_openai_protocol.py",
+    "sha256": "64b37982748cd0f1bd92c0bc76cfe8c85217a6b46ffa0b550e30bf48b326ad43"
+  },
+  {
+    "path": "tests/test_pubmed_search.py",
+    "sha256": "1d4ad43e268946577df6297f7c3cfd48fbeb9b4d22722ad201d9048b8864e96c"
+  },
+  {
+    "path": "tests/test_refactored_services.py",
+    "sha256": "e2185d17c54999de776e7ddb64337001e72263063d9c6abb9e95a821c2cdfc26"
+  },
+  {
+    "path": "tests/test_review_title.py",
+    "sha256": "d2902726bf0d77215345ba2d79d3812dce40a6b6da6a02fb9381aa4ef52e8b69"
+  },
+  {
+    "path": "tests/test_secrets_manager.py",
+    "sha256": "e492a32a53abb0adfa5c761743368b9fa3ca63f720c2f5d13cf729cd2abc219c"
+  },
+  {
+    "path": "tests/test_smart_literature_search_flow.py",
+    "sha256": "7226b8307827053f0269e7a883e9631fdd276de769c4cb13345d4c66d44c964a"
+  },
+  {
+    "path": "tests/test_workbench_app.py",
+    "sha256": "443a95a4b31eb671f0a9790c8c00896c7e1c936c226aa892c610b66f8ebab3e5"
+  },
+  {
+    "path": "tests/test_workbench_jobs.py",
+    "sha256": "76ef6d94c31bafa9a414eb771bd25bf7a172f1cd56d71f1dd3664c84319724f8"
+  },
+  {
+    "path": "tests/test_workbench_search_gate.py",
+    "sha256": "48aa30b70e669e6994531ad9ade459bc522ea4a27b0757f768bfafcaa591fdaa"
+  },
+  {
+    "path": "tests/test_workbench_settings.py",
+    "sha256": "9b90ff2794b8adaa4bbddea2b36485139ec71b0212c1d3d54f9c95cd5ef94fdf"
+  },
+  {
+    "path": "tests/test_workbench_store.py",
+    "sha256": "90c675dccabc06633c5bc982dbfa5b28b56a2e33695a762df59b972fee19d66e"
+  },
+  {
+    "path": "tools/build-tray.ps1",
+    "sha256": "d872dc119d885a0728209424778208a97a4497610bc3ca2e095b80cce5f76a23"
+  },
+  {
+    "path": "tools/check_dependencies.py",
+    "sha256": "bdcd24a40ea9624b0631a03186b9121028722e60399ba882aeb52f238b44fca8"
+  },
+  {
+    "path": "tools/make-icon.ps1",
+    "sha256": "ca8f6970941886aabf4d35eba20b30218a4f2e2570bfd9bb4c31b8c27abaae09"
+  },
+  {
+    "path": "tools/prepare_release.py",
+    "sha256": "776d6eb41c504ec56c3dc4b980303e73cbdf714222afb0554c6b35a2fd8522ad"
+  },
+  {
+    "path": "tools/select_package_indexes.py",
+    "sha256": "85ffe7b9ff91ee5d2bb8c0e86f9bc9ca62fdbc7a92ac2d098f1c95f8edcb0536"
+  },
+  {
+    "path": "tools/workbench.ico",
+    "sha256": "cd614eba75f95509f7964e3a978170b72773e244c0405ce387c413dab64dadac"
+  },
+  {
+    "path": "tools/WorkbenchTray.cs",
+    "sha256": "e346091a648dd4b6db0a1948d66b119950a0d5bea24143b5fbae5cfc4e715f77"
+  }
+]
