@@ -12,11 +12,21 @@ def test_heading_after_intro(prefix):
     assert MedicalReviewGenerator._clean_ai_intro(None, prefix + article) == article
 
 
-@pytest.mark.parametrize('body', ['## 1. 引言\n正文', '摘要内容\n\n## 引言\n正文', '正文'])
+@pytest.mark.parametrize('body', ['# 1. 引言\n正文', '## 1. 引言\n正文', '摘要内容\n\n## 引言\n正文', '正文'])
 def test_missing_title_preserves_all_content(body):
     result = normalize_review_title(body, '研究主题')
     assert result == '# 研究主题\n\n' + body
     assert normalize_review_title(result, '研究主题') == result
+
+
+def test_inline_section_heading_gets_title():
+    result = normalize_review_title('生成说明。# 1. 引言\n正文', '研究主题')
+    assert result == '# 研究主题\n\n# 1. 引言\n正文'
+
+
+def test_existing_non_section_title_is_preserved():
+    result = normalize_review_title('生成说明。\n# 另一篇综述\n\n## 引言\n正文', '研究主题')
+    assert result == '# 另一篇综述\n\n## 引言\n正文'
 
 
 def test_empty_response_remains_empty():

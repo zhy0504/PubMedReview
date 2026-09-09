@@ -133,7 +133,7 @@
   },
   {
     "path": "src/review_content.py",
-    "sha256": "e83f09c63b49798b258a7453913b4bf68a2f94e18333b94af71d6425118d6f2f"
+    "sha256": "5dff2e4a2411cede096361b05e0e2cbbac45d302149a2e3851518681569739e5"
   },
   {
     "path": "src/review_outline_generator.py",
@@ -293,7 +293,7 @@
   },
   {
     "path": "tests/test_review_title.py",
-    "sha256": "d2902726bf0d77215345ba2d79d3812dce40a6b6da6a02fb9381aa4ef52e8b69"
+    "sha256": "74f788b90fa4448458326d2f85930fa7dc55d1247d77425893280d218e35ca41"
   },
   {
     "path": "tests/test_secrets_manager.py",
