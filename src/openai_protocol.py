@@ -1,6 +1,7 @@
 """Stateless OpenAI text requests with protocol-specific wire formats."""
 
 import json
+import time
 from urllib.parse import urlsplit
 
 import requests
@@ -116,10 +117,24 @@ def build_request(messages, model, parameters, protocol, base_url=None, provider
 
 def normalize_response(data, protocol):
     if data.get('error'):
-        return {'error': 'AI 接口返回错误'}
+        error = data.get('error')
+        if isinstance(error, dict):
+            detail = error.get('message') or error.get('code') or '未知错误'
+        else:
+            detail = str(error)
+        return {'error': f'AI 接口返回错误：{detail}'}
     if protocol == 'openai_responses':
         if data.get('status') != 'completed':
-            return {'error': 'Responses 未完整完成生成：' + str(data.get('status', 'unknown'))}
+            status = str(data.get('status', 'unknown'))
+            details = data.get('incomplete_details') or {}
+            reason = details.get('reason') if isinstance(details, dict) else None
+            message = f'Responses 生成未完成：{reason or status}'
+            result = {'error': message, 'status': status}
+            if reason:
+                result['incomplete_reason'] = reason
+            if data.get('usage'):
+                result['usage'] = data['usage']
+            return result
         content = ''.join(part.get('text', '') for item in data.get('output', [])
                           if item.get('type') == 'message' for part in item.get('content', [])
                           if part.get('type') == 'output_text')
@@ -136,38 +151,59 @@ def send_text(session, config, messages, model, parameters):
     provider = getattr(config, 'service_name', None) or getattr(config, 'name', None)
     body = build_request(messages, model, parameters, protocol, config.base_url, provider)
     path = 'responses' if protocol == 'openai_responses' else 'chat/completions'
-    try:
-        with session.post(endpoint(config.base_url, path, provider=provider), json=body,
-                          stream=body['stream'], timeout=config.timeout) as response:
-            response.raise_for_status()
-            if not body['stream']:
-                return normalize_response(response.json(), protocol)
-            parts = []
-            usage = {}
-            finished = False
-            for line in response.iter_lines():
-                if not line or not line.startswith(b'data:'):
-                    continue
-                value = line[5:].strip()
-                if value == b'[DONE]':
-                    break
-                event = json.loads(value)
-                if event.get('error') or event.get('type') in ('error', 'response.failed', 'response.incomplete'):
-                    return {'error': 'AI 流式生成失败或不完整'}
-                if protocol == 'openai_responses':
-                    if event.get('type') == 'response.completed':
-                        return normalize_response(event['response'], protocol)
-                else:
-                    usage = event.get('usage') or usage
-                    for choice in event.get('choices', []):
-                        parts.append(choice.get('delta', {}).get('content') or '')
-                        reason = choice.get('finish_reason')
-                        if reason and reason != 'stop':
-                            return {'error': 'AI 输出截断或被拒绝：' + reason}
-                        finished = finished or reason == 'stop'
-            if not finished:
-                return {'error': 'AI 连接中断，未收到完整结束事件'}
-            return {'choices': [{'message': {'role': 'assistant', 'content': ''.join(parts)}}], 'usage': usage}
-    except (requests.RequestException, ValueError, KeyError) as error:
-        status = getattr(getattr(error, 'response', None), 'status_code', None)
-        return {'error': f'AI 请求失败 ({type(error).__name__}, HTTP {status or "N/A"})'}
+    attempts = 3 if is_deepseek_url(config.base_url) else 1
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            with session.post(endpoint(config.base_url, path, provider=provider), json=body,
+                              stream=body['stream'], timeout=config.timeout) as response:
+                response.raise_for_status()
+                if not body['stream']:
+                    return normalize_response(response.json(), protocol)
+                parts = []
+                usage = {}
+                finished = False
+                for line in response.iter_lines():
+                    if not line or not line.startswith(b'data:'):
+                        continue
+                    value = line[5:].strip()
+                    if value == b'[DONE]':
+                        break
+                    event = json.loads(value)
+                    event_type = event.get('type')
+                    if event.get('error'):
+                        return normalize_response(event, protocol)
+                    if protocol == 'openai_responses':
+                        if event_type == 'response.completed':
+                            return normalize_response(event['response'], protocol)
+                        if event_type in ('response.failed', 'response.incomplete'):
+                            return normalize_response(event.get('response') or event, protocol)
+                    else:
+                        usage = event.get('usage') or usage
+                        for choice in event.get('choices', []):
+                            parts.append(choice.get('delta', {}).get('content') or '')
+                            reason = choice.get('finish_reason')
+                            if reason and reason != 'stop':
+                                return {'error': 'AI 输出截断或被拒绝：' + reason}
+                            finished = finished or reason == 'stop'
+                if not finished:
+                    return {'error': 'AI 连接中断，未收到完整结束事件'}
+                return {'choices': [{'message': {'role': 'assistant', 'content': ''.join(parts)}}], 'usage': usage}
+        except requests.RequestException as error:
+            last_error = error
+            retryable = isinstance(error, (requests.exceptions.SSLError,
+                                           requests.exceptions.ConnectionError,
+                                           requests.exceptions.Timeout))
+            if retryable and attempt < attempts - 1:
+                if is_deepseek_url(config.base_url):
+                    session.trust_env = False
+                time.sleep(min(0.25 * (2 ** attempt), 1.0))
+                continue
+            status = getattr(getattr(error, 'response', None), 'status_code', None)
+            return {'error': f'AI 请求失败 ({type(error).__name__}, HTTP {status or "N/A"})'}
+        except (ValueError, KeyError) as error:
+            last_error = error
+            status = getattr(getattr(error, 'response', None), 'status_code', None)
+            return {'error': f'AI 响应解析失败 ({type(error).__name__}, HTTP {status or "N/A"})'}
+    status = getattr(getattr(last_error, 'response', None), 'status_code', None)
+    return {'error': f'AI 请求失败 ({type(last_error).__name__}, HTTP {status or "N/A"})'}

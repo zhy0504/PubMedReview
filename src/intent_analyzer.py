@@ -659,6 +659,11 @@ class IntentAnalyzer:
             )
             
             self.performance_stats['ai_calls'] += 1
+
+            if isinstance(response, dict) and response.get('error'):
+                self.performance_stats['errors'] += 1
+                print(f"AI意图分析请求失败: {response['error']}")
+                return SearchCriteria(query=user_input)
             
             # 直接处理响应解析，不依赖format_response方法
             ai_response = self._extract_response_content(response)

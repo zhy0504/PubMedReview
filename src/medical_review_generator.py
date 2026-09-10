@@ -261,6 +261,8 @@ class PandocExporter:
 
 class MedicalReviewGenerator:
     """医学综述文章生成器 - 简化版本"""
+
+    ARTICLE_RETRY_MAX_TOKENS = 20000
     
     def __init__(self, config_name: str = None, output_dir: str = "output/综述文章"):
         """
@@ -677,16 +679,41 @@ class MedicalReviewGenerator:
             print("正在生成完整综述文章...")
             print(f"提示词长度: {len(prompt)} 字符")
             
-            # 调用AI生成完整文章
-            response = self.adapter.send_message(
-                messages, 
-                self.model_id, 
-                self.model_parameters
-            )
-            
+            # 调用AI生成完整文章；未设置输出上限且因上限中断时只重试一次
+            request_parameters = dict(self.model_parameters)
+            response = None
+            for attempt in range(2):
+                response = self.adapter.send_message(
+                    messages,
+                    self.model_id,
+                    request_parameters
+                )
+                if not isinstance(response, dict) or not response.get('error'):
+                    break
+                if (attempt == 0
+                        and response.get('incomplete_reason') == 'max_output_tokens'
+                        and request_parameters.get('max_tokens') is None):
+                    request_parameters['max_tokens'] = self.ARTICLE_RETRY_MAX_TOKENS
+                    print(f"[WARN] AI输出达到服务端默认上限，使用 {self.ARTICLE_RETRY_MAX_TOKENS} tokens 重试")
+                    continue
+                break
+
+            if not isinstance(response, dict):
+                print("完整综述 AI 请求失败：返回格式无效")
+                return ""
+            if response.get('error'):
+                error_content = self.ai_client.format_response(response, self.adapter.config.api_type)
+                self._save_raw_output(error_content, title or "医学综述")
+                print(f"完整综述 AI 请求失败: {response['error']}")
+                return ""
+
             # 格式化响应
             article_content = self.ai_client.format_response(response, self.adapter.config.api_type)
-            
+            if not isinstance(article_content, str) or not article_content.strip() or article_content.lstrip().startswith(('错误:', '未知响应格式:', '解析响应失败:')):
+                self._save_raw_output(str(article_content or ''), title or "医学综述")
+                print("完整综述 AI 返回内容无效")
+                return ""
+
             # 保存原始AI输出到md文件
             self._save_raw_output(article_content, title or "医学综述")
             
@@ -769,7 +796,7 @@ class MedicalReviewGenerator:
         print(f"已添加完整参考文献列表 ({len(literature)} 篇文献)")
         return article_content
 
-    def _reorder_citations_and_references(self, article_content: str, literature: List[Literature]) -> str:
+    def _reorder_citations_and_references(self, article_content: str, literature: List[Literature]) -> Tuple[str, List[Literature]]:
         """
         重新排序引用标记和参考文献
         按文章中引用出现的顺序重新编号，只保留被引用的文献
@@ -780,7 +807,7 @@ class MedicalReviewGenerator:
             literature: 文献列表
             
         Returns:
-            str: 重新编号后的文章内容
+            Tuple[str, List[Literature]]: 重新编号后的文章内容和对应文献列表
         """
         import re
 
@@ -788,25 +815,34 @@ class MedicalReviewGenerator:
         original_length = len(article_content)
         print(f"重新编号前内容长度: {original_length} 字符")
 
-        # 1. 提取文章中所有的引用标记，支持单个和多个引用
-        # 匹配格式: [数字] 或 [数字, 数字, ...]
-        citation_pattern = r'\[([0-9, ]+)\]'
+        def parse_citation_numbers(value):
+            numbers = []
+            for token in re.split(r'\s*,\s*', value.strip()):
+                if token.isdigit():
+                    numbers.append(int(token))
+                    continue
+                range_match = re.fullmatch(r'(\d+)\s*-\s*(\d+)', token)
+                if not range_match:
+                    continue
+                start, end = (int(part) for part in range_match.groups())
+                if end >= start and end - start <= 1000:
+                    numbers.extend(range(start, end + 1))
+            return numbers
+
+        # 1. 提取文章中所有的引用标记，支持单个、多个和范围引用
+        citation_pattern = r'\[([0-9]+(?:\s*[-,]\s*[0-9]+)*)\]'
         citation_matches = re.findall(citation_pattern, article_content)
         
         # 解析所有引用的数字
         all_citations = []
         for match in citation_matches:
-            # 分割逗号分隔的数字
-            numbers = [num.strip() for num in match.split(',')]
-            for num_str in numbers:
-                if num_str.isdigit():
-                    all_citations.append(num_str)
+            all_citations.extend(str(number) for number in parse_citation_numbers(match))
         
         print(f"找到的引用标记: {all_citations[:10]}...")  # 只显示前10个
         
         if not all_citations:
             print("文章中未发现引用标记，跳过重新编号")
-            return article_content
+            return article_content, literature
         
         # 2. 按出现顺序去重，保持顺序
         cited_indices = []
@@ -821,7 +857,7 @@ class MedicalReviewGenerator:
         
         if not cited_indices:
             print("未找到有效的引用索引，保持原样")
-            return article_content
+            return article_content, literature
         
         print(f"发现 {len(cited_indices)} 个被引用的文献，按出现顺序重新编号")
         
@@ -835,17 +871,15 @@ class MedicalReviewGenerator:
         # 4. 替换文章中的引用标记（支持多文献引用）
         def replace_multi_citation(match):
             citation_content = match.group(1)
-            numbers = [num.strip() for num in citation_content.split(',')]
+            numbers = parse_citation_numbers(citation_content)
             new_numbers = []
             
-            for num_str in numbers:
-                if num_str.isdigit():
-                    old_num = int(num_str)
-                    new_num = old_to_new.get(old_num)
-                    if new_num:
-                        new_numbers.append(str(new_num))
-                    # 如果引用的文献不在映射中，跳过（不包含在新引用中）
-                    # 这样可以自动过滤掉超出文献列表范围的无效引用
+            for old_num in numbers:
+                new_num = old_to_new.get(old_num)
+                if new_num and str(new_num) not in new_numbers:
+                    new_numbers.append(str(new_num))
+                # 如果引用的文献不在映射中，跳过（不包含在新引用中）
+                # 这样可以自动过滤掉超出文献列表范围的无效引用
             
             # 重新组合多个引用，按数字大小排序
             if not new_numbers:
@@ -902,20 +936,18 @@ class MedicalReviewGenerator:
     
     def generate_references(self, literature: List[Literature]) -> str:
         """
-        生成AMA格式的参考文献列表，PubMed地址超链接化
+        生成AMA格式的参考文献列表，将参考文献编号链接到PubMed
 
         Args:
             literature: 文献列表
 
         Returns:
-            str: 格式化的参考文献（含超链接）
+            str: 格式化的参考文献（链接文字仅显示编号）
         """
         references = []
         for i, lit in enumerate(literature, 1):
-            ref = f"{i}. {lit.get_ama_citation()}"
-            if lit.url:
-                # 使用Markdown链接格式，Pandoc会转换为DOCX超链接
-                ref += f" Available from: [{lit.url}]({lit.url})"
+            number = rf"[\[{i}\]]({lit.url})" if lit.url else f"[{i}]"
+            ref = f"{number} {lit.get_ama_citation()}"
             references.append(ref)
 
         return '\n'.join(references)
@@ -937,6 +969,29 @@ class MedicalReviewGenerator:
             if lit.url:
                 citation_urls[i] = lit.url
 
+        def citation_link(number, url=None):
+            target = url or citation_urls.get(number)
+            if target:
+                return rf"[\[{number}\]]({target})"
+            return f"[{number}]"
+
+        existing_link_pattern = re.compile(
+            r'(?:\[\[(?P<double>[0-9]+)\]\]'
+            r'|\[\\\[(?P<escaped>[0-9]+)\\\]\]'
+            r'|\[(?P<plain>[0-9]+)\])'
+            r'\((?P<url>https?://[^)\s]+)\)'
+        )
+
+        def normalize_existing_link(match):
+            number = next(
+                int(match.group(name))
+                for name in ('double', 'escaped', 'plain')
+                if match.group(name) is not None
+            )
+            return citation_link(number, match.group('url'))
+
+        content = existing_link_pattern.sub(normalize_existing_link, content)
+
         # 匹配引用标号，如[1]、[2]、[1,2]、[1-3]等
         def replace_citation(match):
             citation_text = match.group(0)  # 如 [1] 或 [1,2]
@@ -945,9 +1000,7 @@ class MedicalReviewGenerator:
             # 处理单个引用 [1]
             if inner_text.isdigit():
                 num = int(inner_text)
-                if num in citation_urls:
-                    return f"[[{num}]]({citation_urls[num]})"
-                return citation_text
+                return citation_link(num) if num in citation_urls else citation_text
 
             # 处理范围引用 [1-3]
             if '-' in inner_text and ',' not in inner_text:
@@ -958,11 +1011,8 @@ class MedicalReviewGenerator:
                         return citation_text
                     links = []
                     for num in range(start, end + 1):
-                        if num in citation_urls:
-                            links.append(f"[[{num}]]({citation_urls[num]})")
-                        else:
-                            links.append(f"[{num}]")
-                    return ''.join(links)
+                        links.append(citation_link(num))
+                    return '–'.join(links)
 
             # 处理多个引用 [1,2,3]
             if ',' in inner_text:
@@ -971,18 +1021,15 @@ class MedicalReviewGenerator:
                 for n in nums:
                     if n.isdigit():
                         num = int(n)
-                        if num in citation_urls:
-                            links.append(f"[[{num}]]({citation_urls[num]})")
-                        else:
-                            links.append(f"[{num}]")
+                        links.append(citation_link(num))
                     else:
                         links.append(f"[{n}]")
-                return ''.join(links)
+                return ', '.join(links)
 
             return citation_text
 
         # 匹配 [数字] 或 [数字,数字] 或 [数字-数字] 格式
-        pattern = r'(?<![\[\\])\[([0-9]+(?:\s*[-,]\s*[0-9]+)*)\](?!\s*\(|\]\s*\(|\[)'
+        pattern = r'(?<![\[\\])\[([0-9]+(?:\s*[-,]\s*[0-9]+)*)\](?!\s*\(|\s*\[[^0-9])'
         content = re.sub(pattern, replace_citation, content)
 
         return content

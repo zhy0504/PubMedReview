@@ -103,8 +103,9 @@ class TestURLAndModelConfig:
         url = manager.get_base_url("openai", config_url="https://config.api.com/")
         assert url == "https://runtime.api.com/"
 
-    def test_get_model_default(self):
+    def test_get_model_default(self, monkeypatch):
         """测试默认模型获取"""
+        monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
         manager = SecretsManager()
         model = manager.get_model("deepseek")
         assert model == "deepseek-v4-flash"

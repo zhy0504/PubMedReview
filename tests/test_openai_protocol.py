@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import requests
+
 from openai_protocol import build_request, endpoint, is_model_compatible, normalize_response, send_text
 from pubmed_search import SearchConfig, PubMedSearcher
 
@@ -136,6 +138,51 @@ def test_stream_disconnect_is_error():
     session = SimpleNamespace(post=lambda *args, **kwargs: Response())
     config = SimpleNamespace(api_type='openai_responses', base_url='https://example.org', timeout=10)
     assert 'error' in send_text(session, config, [], 'test', {})
+
+
+def test_responses_stream_incomplete_preserves_reason():
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def raise_for_status(self): pass
+        def iter_lines(self):
+            return iter([b'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"output_tokens":700}}}'])
+
+    session = SimpleNamespace(post=lambda *args, **kwargs: Response())
+    config = SimpleNamespace(api_type='openai_responses', base_url='https://example.org', timeout=10)
+    result = send_text(session, config, [], 'test', {})
+    assert result['incomplete_reason'] == 'max_output_tokens'
+    assert result['usage']['output_tokens'] == 700
+
+
+def test_deepseek_stream_retries_transport_failure(monkeypatch):
+    calls = []
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def raise_for_status(self): pass
+        def iter_lines(self):
+            return iter([
+                b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}',
+                b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+                b'data: [DONE]',
+            ])
+
+    class Session:
+        trust_env = True
+
+        def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if len(calls) == 1:
+                raise requests.exceptions.SSLError('temporary TLS failure')
+            return Response()
+
+    monkeypatch.setattr('openai_protocol.time.sleep', lambda *_: None)
+    config = SimpleNamespace(api_type='openai', base_url='https://api.deepseek.com', timeout=10)
+    result = send_text(Session(), config, [], 'deepseek-v4-flash', {})
+    assert len(calls) == 2
+    assert result['choices'][0]['message']['content'] == 'ok'
 
 
 def test_pubmed_key_and_reservation(monkeypatch):
