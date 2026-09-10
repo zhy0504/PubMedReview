@@ -42,6 +42,29 @@ def test_references_hide_url_in_visible_text():
 
     assert 'Available from' not in references
     assert r'[\[1\]](https://pubmed.ncbi.nlm.nih.gov/1)' in references
+    assert '\n\n' in references
+    assert '\n' + r'[\[2\]]' in references
+
+
+def test_reference_paragraphs_use_hanging_indent(tmp_path):
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from medical_review_generator import PandocExporter
+
+    path = tmp_path / 'references.docx'
+    document = Document()
+    document.add_heading('综述', level=1)
+    document.add_heading('参考文献', level=1)
+    document.add_paragraph('[1] 第一篇')
+    document.add_paragraph('[2] 第二篇')
+    document.save(path)
+
+    PandocExporter.format_reference_paragraphs(str(path))
+
+    references = Document(path).paragraphs[-2:]
+    assert all(paragraph.alignment == WD_ALIGN_PARAGRAPH.LEFT for paragraph in references)
+    assert all(paragraph.paragraph_format.left_indent.twips == 420 for paragraph in references)
+    assert all(paragraph.paragraph_format.first_line_indent.twips == -420 for paragraph in references)
 
 
 def _literature_items():

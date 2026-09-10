@@ -246,6 +246,7 @@ class PandocExporter:
         try:
             # 执行转换
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            self.format_reference_paragraphs(output_file)
             print(f"成功导出DOCX: {output_file}")
             return output_file
             
@@ -253,6 +254,34 @@ class PandocExporter:
             error_msg = f"Pandoc转换失败: {e.stderr}"
             print(error_msg)
             raise RuntimeError(error_msg)
+
+    @staticmethod
+    def format_reference_paragraphs(docx_file: str) -> str:
+        """Apply a hanging indent and left alignment to the bibliography."""
+        try:
+            from docx import Document
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.shared import Cm, Pt
+        except ImportError:
+            return docx_file
+
+        document = Document(docx_file)
+        in_references = False
+        for paragraph in document.paragraphs:
+            if paragraph.text.strip() == "参考文献":
+                in_references = True
+                continue
+            if not in_references:
+                continue
+
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.left_indent = Cm(0.74)
+            paragraph.paragraph_format.first_line_indent = Cm(-0.74)
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+
+        document.save(docx_file)
+        return docx_file
     
     def is_available(self) -> bool:
         """检查Pandoc是否可用"""
@@ -950,7 +979,9 @@ class MedicalReviewGenerator:
             ref = f"{number} {lit.get_ama_citation()}"
             references.append(ref)
 
-        return '\n'.join(references)
+        # Keep each reference as its own Markdown paragraph so Pandoc
+        # preserves one bibliography entry per Word paragraph.
+        return '\n\n'.join(references)
 
     def _add_citation_hyperlinks(self, content: str, literature: List[Literature]) -> str:
         """
