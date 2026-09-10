@@ -23,6 +23,7 @@ import yaml
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from urllib.parse import urljoin
+from openai_protocol import endpoint, is_deepseek_url
 
 # ============ 常量定义 ============
 MAX_BACKOFF_SECONDS = 10  # 最大退避等待时间（秒）
@@ -224,6 +225,8 @@ class EnhancedConnectionManager:
                     response.raise_for_status()
 
             except requests.exceptions.RequestException as e:
+                if is_deepseek_url(url) and isinstance(e, (requests.exceptions.SSLError, requests.exceptions.ConnectionError)):
+                    session.trust_env = False
                 with self.lock:
                     self.request_stats['total_requests'] += 1
                     self.request_stats['failed_requests'] += 1
@@ -306,10 +309,9 @@ class BaseAIAdapter:
 
         # 基础会话配置
         self.session = self.connection_manager.get_session()
-        self.session.headers.update({
-            'Authorization': f'Bearer {config.api_key}',
-            'Content-Type': 'application/json'
-        })
+        self.session.headers.update({'Content-Type': 'application/json'})
+        if config.api_key:
+            self.session.headers['Authorization'] = f'Bearer {config.api_key}'
 
         # 性能统计
         self.performance_stats = {
@@ -418,12 +420,12 @@ class OpenAIAdapter(BaseAIAdapter):
             if self.enable_retry:
                 response = self.connection_manager.make_request_with_retry(
                     'GET',
-                    f"{self.config.base_url}v1/models",
+                    endpoint(self.config.base_url, 'models', provider=self.config.name),
                     max_retries=2
                 )
             else:
                 response = self.session.get(
-                    f"{self.config.base_url}v1/models",
+                    endpoint(self.config.base_url, 'models', provider=self.config.name),
                     timeout=10
                 )
                 response.raise_for_status()
@@ -450,12 +452,12 @@ class OpenAIAdapter(BaseAIAdapter):
             if self.enable_retry:
                 response_data = self.connection_manager.make_request_with_retry(
                     'GET',
-                    f"{self.config.base_url}v1/models",
+                    endpoint(self.config.base_url, 'models', provider=self.config.name),
                     max_retries=2
                 )
             else:
                 response = self.session.get(
-                    f"{self.config.base_url}v1/models",
+                    endpoint(self.config.base_url, 'models', provider=self.config.name),
                     timeout=15  # 模型获取超时设置为15秒
                 )
                 response.raise_for_status()
@@ -542,72 +544,22 @@ class OpenAIAdapter(BaseAIAdapter):
     def send_message(self, messages: List[ChatMessage], model_id: str, 
                     parameters: Dict[str, Any] = None) -> Dict[str, Any]:
         """发送OpenAI消息"""
-        start_time = time.time()
-        
-        if parameters is None:
-            parameters = {}
-        
-        # 检查缓存
-        cache_hit = False
-        cached_response = self._check_cache(messages, model_id, parameters)
-        if cached_response:
-            cache_hit = True
-            # 构造缓存的响应格式
-            return {
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": cached_response
-                    }
-                }],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                },
-                "cached": True
-            }
-        
-        # 过滤None值的参数，特别是max_tokens=None时不发送该参数
-        filtered_params = {k: v for k, v in parameters.items() if v is not None}
-        
-        # 构建请求数据
-        request_data = {
-            "model": model_id,
-            "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
-            **filtered_params
-        }
-        
-        # 检查是否使用流式输出
-        if parameters.get("stream", True):
-            response = self._send_stream_message(request_data)
-        else:
-            response = self._send_regular_message(request_data)
-        
-        # 缓存成功的响应
-        if not response.get('error') and 'choices' in response:
-            content = response['choices'][0]['message']['content']
-            self._cache_response(messages, model_id, content, parameters)
-        
-        # 更新性能统计
-        tokens = response.get('usage', {}).get('total_tokens', 0)
-        self._update_performance_stats(start_time, tokens, cache_hit)
-        
-        return response
-    
+        from openai_protocol import send_text
+        return send_text(self.session, self.config, messages, model_id, parameters)
+
     def _send_regular_message(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         """发送常规非流式消息"""
         try:
             if self.enable_retry:
                 response = self.connection_manager.make_request_with_retry(
                     'POST',
-                    f"{self.config.base_url}v1/chat/completions",
+                    endpoint(self.config.base_url, 'chat/completions', provider=self.config.name),
                     json_data=request_data,
                     max_retries=3
                 )
             else:
                 response = self.session.post(
-                    f"{self.config.base_url}v1/chat/completions",
+                    endpoint(self.config.base_url, 'chat/completions', provider=self.config.name),
                     json=request_data,
                     timeout=self.config.timeout
                 )
@@ -626,7 +578,7 @@ class OpenAIAdapter(BaseAIAdapter):
         """发送流式消息"""
         try:
             response = self.session.post(
-                f"{self.config.base_url}v1/chat/completions",
+                endpoint(self.config.base_url, 'chat/completions', provider=self.config.name),
                 json=request_data,
                 stream=True,
                 timeout=self.config.timeout
@@ -701,6 +653,97 @@ class OpenAIAdapter(BaseAIAdapter):
             "cache_stats": self.cache_manager.get_cache_stats() if self.cache_manager else {}
         }
         return {**base_report, **openai_report}
+
+
+class AnthropicAdapter(BaseAIAdapter):
+    """Anthropic Messages API adapter normalized to the project response shape."""
+
+    def __init__(self, config: AIConfig, enable_cache: bool = True, enable_retry: bool = True):
+        super().__init__(config, enable_cache, enable_retry)
+        self.session.headers.pop('Authorization', None)
+        self.session.headers.update({
+            'x-api-key': config.api_key,
+            'anthropic-version': '2023-06-01',
+        })
+        self._models_cache = []
+
+    def test_connection(self) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "message": "Anthropic 已配置；模型列表需手动填写",
+        }
+
+    def get_available_models(self) -> List[ModelInfo]:
+        # Anthropic's Messages API does not provide the same public model-list
+        # contract as OpenAI-compatible services.  Keep model entry manual.
+        return list(self._models_cache)
+
+    def get_model_parameters(self, model_id: str) -> Dict[str, Any]:
+        return {
+            "temperature": {"type": "float", "min": 0.0, "max": 1.0, "default": 0.3},
+            "max_tokens": {"type": "int", "min": 1, "max": 200000, "default": 4096},
+            "stream": {"type": "bool", "default": True},
+        }
+
+    @staticmethod
+    def _request_body(messages: List[ChatMessage], model_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        system_parts = [message.content for message in messages if message.role == 'system' and message.content]
+        turns = [
+            {"role": message.role, "content": message.content}
+            for message in messages if message.role in {'user', 'assistant'} and message.content
+        ]
+        body = {
+            "model": model_id,
+            "max_tokens": parameters.get('max_tokens') or 4096,
+            "messages": turns or [{"role": "user", "content": "请输出结果。"}],
+            "stream": bool(parameters.get('stream', True)),
+        }
+        if system_parts:
+            body['system'] = '\n\n'.join(system_parts)
+        for key in ('stop_sequences',):
+            if parameters.get(key) is not None:
+                body[key] = parameters[key]
+        return body
+
+    def send_message(self, messages: List[ChatMessage], model_id: str,
+                     parameters: Dict[str, Any] = None) -> Dict[str, Any]:
+        parameters = parameters or {}
+        cached = self._check_cache(messages, model_id, parameters)
+        if cached:
+            return {"choices": [{"message": {"role": "assistant", "content": cached}}], "cached": True}
+        body = self._request_body(messages, model_id, parameters)
+        url = endpoint(self.config.base_url, 'messages', provider='anthropic')
+        try:
+            with self.session.post(url, json=body, stream=body['stream'], timeout=self.config.timeout) as response:
+                response.raise_for_status()
+                if not body['stream']:
+                    payload = response.json()
+                    content = ''.join(
+                        part.get('text', '') for part in payload.get('content', [])
+                        if part.get('type') == 'text'
+                    )
+                    normalized = {"choices": [{"message": {"role": "assistant", "content": content}}],
+                                  "usage": payload.get('usage') or {}}
+                    if content:
+                        self._cache_response(messages, model_id, content, parameters)
+                    return normalized
+                parts = []
+                for line in response.iter_lines():
+                    if not line or not line.startswith(b'data:'):
+                        continue
+                    event = json.loads(line[5:].strip())
+                    if event.get('type') == 'error' or event.get('error'):
+                        return {"error": "Anthropic 流式生成失败"}
+                    delta = event.get('delta') or {}
+                    if delta.get('type') == 'text_delta':
+                        parts.append(delta.get('text') or '')
+                content = ''.join(parts)
+                if not content:
+                    return {"error": "Anthropic 连接中断，未收到文本"}
+                self._cache_response(messages, model_id, content, parameters)
+                return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+        except (requests.RequestException, ValueError, KeyError):
+            return {"error": "Anthropic 请求失败"}
 
 
 class GeminiAdapter(BaseAIAdapter):
@@ -895,6 +938,8 @@ class GeminiAdapter(BaseAIAdapter):
         
         # 过滤None值的参数，同时转换OpenAI参数到Gemini参数
         filtered_params = {}
+        clean_model_id = model_id[7:] if model_id.startswith('models/') else model_id
+        is_gemini3 = clean_model_id.lower().startswith('gemini-3')
         
         for k, v in parameters.items():
             if v is None:
@@ -902,6 +947,11 @@ class GeminiAdapter(BaseAIAdapter):
                 
             # 跳过stream参数，单独处理
             if k == "stream":
+                continue
+
+            # Gemini 3 uses thinkingLevel and no longer accepts these legacy
+            # sampling controls in generationConfig.
+            if is_gemini3 and k in {'temperature', 'top_p', 'top_k'}:
                 continue
                 
             # 转换OpenAI参数名到Gemini参数名
@@ -920,6 +970,21 @@ class GeminiAdapter(BaseAIAdapter):
             elif k == "frequency_penalty":
                 # 尝试使用Gemini的frequencyPenalty参数
                 filtered_params["frequencyPenalty"] = v
+            elif k == "reasoning_effort":
+                if is_gemini3:
+                    level = str(v or '').strip().lower()
+                    level = {
+                        'none': 'low',
+                        'minimal': 'low',
+                        'low': 'low',
+                        'medium': 'medium',
+                        'high': 'high',
+                        'xhigh': 'high',
+                        'max': 'high',
+                    }.get(level, 'medium')
+                    filtered_params["thinkingConfig"] = {
+                        "thinkingLevel": level
+                    }
             elif k == "presence_penalty":
                 # 尝试使用Gemini的presencePenalty参数  
                 filtered_params["presencePenalty"] = v
@@ -984,7 +1049,6 @@ class GeminiAdapter(BaseAIAdapter):
             # 使用官方Gemini API格式，添加查询参数
             import urllib.parse
             # 去掉model_id中的models/前缀，避免双重前缀
-            clean_model_id = model_id[7:] if model_id.startswith('models/') else model_id
             api_url = f"{self.config.base_url}v1beta/models/{clean_model_id}:generateContent?key={urllib.parse.quote(self.config.api_key)}"
             
             if self.enable_retry:
@@ -1269,12 +1333,16 @@ class AIClient:
     
     def create_adapter(self, config: AIConfig) -> BaseAIAdapter:
         """创建AI适配器"""
-        if config.api_type.lower() == 'openai':
+        if config.api_type.lower() in {'openai', 'openai_responses'}:
             adapter = OpenAIAdapter(config, self.enable_cache, self.enable_retry)
             self.current_adapter = adapter
             return adapter
         elif config.api_type.lower() == 'gemini':
             adapter = GeminiAdapter(config, self.enable_cache, self.enable_retry)
+            self.current_adapter = adapter
+            return adapter
+        elif config.api_type.lower() == 'anthropic':
+            adapter = AnthropicAdapter(config, self.enable_cache, self.enable_retry)
             self.current_adapter = adapter
             return adapter
         else:
@@ -1524,7 +1592,15 @@ class AIClient:
             return f"错误: {response['error']}"
         
         try:
-            if api_type.lower() == 'openai':
+            if api_type.lower() in {'openai', 'openai_responses', 'anthropic'}:
+                if api_type.lower() == 'openai_responses' and 'choices' not in response:
+                    text = response.get('output_text', '')
+                    if not text:
+                        for item in response.get('output', []):
+                            for part in item.get('content', []):
+                                if part.get('type') == 'output_text':
+                                    text += part.get('text', '')
+                    return str(text).strip()
                 choices = response.get('choices', [])
                 if choices:
                     content = choices[0].get('message', {}).get('content', '')

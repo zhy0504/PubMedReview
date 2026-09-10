@@ -32,13 +32,18 @@ class SearchConfig:
     max_results: int = 100
     sort_by: str = "relevance"
     batch_size: int = 200
-    request_delay: float = 5.0
+    request_delay: float = 0.0
+    api_key: str = ""
     max_retries: int = 3
     enable_cache: bool = True
     cache_ttl: int = 3600
     cache_max_size: int = 1000
     enable_async: bool = True
     max_concurrent: int = 5
+
+    def __post_init__(self):
+        self.api_key = self.api_key or os.getenv('PUBMED_API_KEY', '').strip()
+        self.request_delay = max(self.request_delay, 0.11 if self.api_key else 0.35)
 
 
 class SearchResultCache:
@@ -160,6 +165,8 @@ class PubMedSearcher:
         """
         self.config = config or SearchConfig()
         self.base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+        self._rate_lock = threading.Lock()
+        self._next_request = 0.0
         self.esearch_url = f"{self.base_url}esearch.fcgi"
         self.efetch_url = f"{self.base_url}efetch.fcgi"
         
@@ -192,6 +199,18 @@ class PubMedSearcher:
         self.async_session = None
         self.thread_pool = ThreadPoolExecutor(max_workers=4) if self.config.enable_async else None
         
+    def _reserve_request(self):
+        with self._rate_lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next_request - now)
+            self._next_request = max(now, self._next_request) + self.config.request_delay
+            return delay
+
+    def _prepare_request(self, params):
+        if self.config.api_key:
+            params['api_key'] = self.config.api_key
+        time.sleep(self._reserve_request())
+
     def search_articles(self, query: str, max_results: int = None, 
                        sort_by: str = None) -> List[str]:
         """
@@ -230,6 +249,8 @@ class PubMedSearcher:
             'tool': self.config.tool,
             'retmode': 'json'
         }
+        if self.config.api_key:
+            params['api_key'] = self.config.api_key
         
         # 执行请求（带重试机制）
         pmids = self._execute_request_with_retry(
@@ -265,6 +286,7 @@ class PubMedSearcher:
                     print(f"{operation}重试 {attempt + 1}/{self.config.max_retries}，等待 {delay:.1f}秒...")
                     time.sleep(delay)
                 
+                self._prepare_request(params)
                 response = self.session.get(url, params=params, timeout=30)
                 
                 # 检查API限制
@@ -473,6 +495,7 @@ class PubMedSearcher:
         
         for attempt in range(self.config.max_retries):
             try:
+                self._prepare_request(params)
                 response = self.session.get(self.efetch_url, params=params, timeout=60)
                 
                 # 检查API限制
@@ -511,6 +534,7 @@ class PubMedSearcher:
         
         for attempt in range(self.config.max_retries):
             try:
+                self._prepare_request(params)
                 response = self.session.get(self.efetch_url, params=params, timeout=60)
                 
                 # 检查API限制
@@ -549,6 +573,9 @@ class PubMedSearcher:
         
         for attempt in range(self.config.max_retries):
             try:
+                if self.config.api_key:
+                    params['api_key'] = self.config.api_key
+                await asyncio.sleep(self._reserve_request())
                 async with self.async_session.get(self.efetch_url, params=params) as response:
                     if response.status == 429:
                         retry_after = int(response.headers.get('retry-after', 60))

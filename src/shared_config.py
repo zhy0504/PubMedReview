@@ -66,7 +66,7 @@ class SystemConfig:
         'DEFAULT_TEMPERATURE': 0.1,
         'DEFAULT_STREAM': True,
         'DEFAULT_MAX_TOKENS': None,
-        'PREFERRED_MODEL': 'gemini-3-pro',
+        'PREFERRED_MODEL': 'gpt-5.6-luna',
     }
 
     def __new__(cls):

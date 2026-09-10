@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from openai_protocol import is_model_compatible
 import yaml
 
 # 添加项目根目录到Python路径
@@ -301,12 +302,12 @@ class MedicalReviewGenerator:
                 self.model_id = cached_model['model_id']
                 self.model_parameters = cached_model['parameters'].copy()
                 self.model_parameters['stream'] = True   # Gemini模型启用流式输出进行测试
-                print(f"使用Gemini模型配置: {self.model_id} (启用流式输出)")
+                print(f"使用当前 AI 模型配置: {self.model_id}")
             else:
                 # 如果没有缓存，使用默认的Gemini模型
-                self.model_id = system_config.PREFERRED_MODEL
+                self.model_id = self.config.default_model or system_config.PREFERRED_MODEL
                 self.model_parameters['stream'] = True
-                print(f"使用默认Gemini模型: {self.model_id} (启用流式输出)")
+                print(f"使用当前 AI 模型: {self.model_id}")
         else:
             raise RuntimeError("未找到可用的AI配置")
     
@@ -331,8 +332,12 @@ class MedicalReviewGenerator:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
                     # 检查缓存数据有效性
-                    if cached_data.get('model_id'):
+                    if cached_data.get('config_name') and cached_data.get('config_name') != self.config.name:
+                        return None
+                    if cached_data.get('model_id') and is_model_compatible(self.config.base_url, cached_data.get('model_id')):
                         return cached_data
+                    if cached_data.get('model_id'):
+                        print(f"[WARN] 忽略与当前 API 不匹配的缓存模型: {cached_data.get('model_id')}")
             except Exception as e:
                 print(f"加载模型配置缓存失败: {e}")
         return None
@@ -686,7 +691,7 @@ class MedicalReviewGenerator:
             self._save_raw_output(article_content, title or "医学综述")
             
             # 清理AI引导语，只保留文章标题开始的内容
-            article_content = self._clean_ai_intro(article_content)
+            article_content = self._clean_ai_intro(article_content, title)
             
             # 标准化段落缩进，确保只有两个全角空格
             article_content = self._normalize_paragraph_indentation(article_content)
@@ -935,7 +940,7 @@ class MedicalReviewGenerator:
         # 匹配引用标号，如[1]、[2]、[1,2]、[1-3]等
         def replace_citation(match):
             citation_text = match.group(0)  # 如 [1] 或 [1,2]
-            inner_text = match.group(1)     # 如 1 或 1,2
+            inner_text = re.sub(r'\s+', '', match.group(1))
 
             # 处理单个引用 [1]
             if inner_text.isdigit():
@@ -949,6 +954,8 @@ class MedicalReviewGenerator:
                 parts = inner_text.split('-')
                 if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
                     start, end = int(parts[0]), int(parts[1])
+                    if end < start or end - start > 1000:
+                        return citation_text
                     links = []
                     for num in range(start, end + 1):
                         if num in citation_urls:
@@ -975,7 +982,7 @@ class MedicalReviewGenerator:
             return citation_text
 
         # 匹配 [数字] 或 [数字,数字] 或 [数字-数字] 格式
-        pattern = r'\[(\d+(?:[-,]\d+)*)\]'
+        pattern = r'(?<![\[\\])\[([0-9]+(?:\s*[-,]\s*[0-9]+)*)\](?!\s*\(|\]\s*\(|\[)'
         content = re.sub(pattern, replace_citation, content)
 
         return content
@@ -1113,30 +1120,10 @@ class MedicalReviewGenerator:
         except Exception as e:
             print(f"[WARN] DOCX转换失败: {e}")
 
-    def _clean_ai_intro(self, content: str) -> str:
-        """清理AI生成内容前面的引导语，只保留文章标题开始的内容"""
-        if not content:
-            return content
-        
-        lines = content.split('\n')
-        
-        # 查找第一个以#开头的标题行
-        title_start_index = -1
-        for i, line in enumerate(lines):
-            line_stripped = line.strip()
-            if line_stripped.startswith('#'):
-                title_start_index = i
-                break
-        
-        # 如果找到标题，从标题开始保留所有内容
-        if title_start_index >= 0:
-            cleaned_content = '\n'.join(lines[title_start_index:]).strip()
-            if cleaned_content and len(cleaned_content) > 50:
-                return cleaned_content
-        
-        # 如果没找到标题或内容过短，返回原始内容
-        print("警告: 未找到标题行或内容过短，返回原始内容")
-        return content
+    def _clean_ai_intro(self, content: str, title: str = None) -> str:
+        from review_content import normalize_review_title
+
+        return normalize_review_title(content, title)
     
     def save_article(self, content: str, filename: str = None, user_input: str = None,
                      export_docx: bool = False, export_md: bool = True) -> tuple:
@@ -1166,6 +1153,7 @@ class MedicalReviewGenerator:
                 filename = f"综述-{timestamp}.md"
 
         filepath = os.path.join(self.output_dir, filename)
+        self.last_saved_content = content
 
         try:
             # 确保输出目录存在（在实际保存时创建）

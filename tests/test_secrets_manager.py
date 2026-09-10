@@ -83,9 +83,10 @@ class TestSecretsManager:
 class TestURLAndModelConfig:
     """URL和模型配置测试"""
 
-    def test_get_base_url_default(self):
+    def test_get_base_url_default(self, monkeypatch):
         """测试默认URL获取"""
         manager = SecretsManager()
+        monkeypatch.delenv('OPENAI_BASE_URL', raising=False)
         url = manager.get_base_url("openai")
         assert url == "https://api.openai.com/"
 
@@ -106,7 +107,7 @@ class TestURLAndModelConfig:
         """测试默认模型获取"""
         manager = SecretsManager()
         model = manager.get_model("deepseek")
-        assert model == "deepseek-chat"
+        assert model == "deepseek-v4-flash"
 
     def test_get_model_from_config(self):
         """测试从配置获取模型"""

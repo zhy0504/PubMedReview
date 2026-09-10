@@ -182,10 +182,13 @@ class SearchCriteria:
     min_if: Optional[float] = None  # 最小影响因子
     max_if: Optional[float] = None  # 最大影响因子
     cas_zones: List[int] = None  # 中科院分区限制 [1,2,3,4]
+    new_rui_2026: List[int] = None
     jcr_quartiles: List[str] = None  # JCR分区限制 ["Q1","Q2","Q3","Q4"]
     keywords: List[str] = None  # 关键词过滤
     
     def __post_init__(self):
+        if self.new_rui_2026 is None:
+            self.new_rui_2026 = []
         if self.cas_zones is None:
             self.cas_zones = []
         if self.jcr_quartiles is None:
@@ -262,6 +265,9 @@ class IntentAnalyzer:
             raise RuntimeError("未找到可用的AI配置")
     
     def _non_interactive_setup_with_cache(self):
+        if self.config.default_model:
+            self.model_id = self.config.default_model
+            return
         """非交互模式下的缓存配置处理"""
         print("\n[AI] AI意图分析器设置")
         print("=" * 30)
@@ -569,6 +575,9 @@ class IntentAnalyzer:
             if not models:
                 print("[FAIL] 端点未返回可用模型")
                 return None
+            if not self.interactive:
+                preferred = self.config.default_model or system_config.PREFERRED_MODEL
+                return next((model.id for model in models if model.id == preferred), models[0].id)
             
             # 查找优先模型的索引
             preferred_model = system_config.PREFERRED_MODEL.lower()
@@ -832,7 +841,7 @@ class IntentAnalyzer:
             return f"错误: {response['error']}"
         
         try:
-            if self.adapter.config.api_type.lower() == 'openai':
+            if self.adapter.config.api_type.lower() in {'openai', 'openai_responses', 'anthropic'}:
                 choices = response.get('choices', [])
                 if choices:
                     content = choices[0].get('message', {}).get('content', '')

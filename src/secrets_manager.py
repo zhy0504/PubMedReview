@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict
 from pathlib import Path
 
+from ai_providers import PROVIDER_PROFILES
+
 
 @dataclass
 class ServiceConfig:
@@ -37,6 +39,29 @@ class ServiceConfig:
     default_url: str
     default_model: str
     description: str
+
+
+def _service_config(profile):
+    """Build the legacy secret descriptor from the shared provider registry."""
+    if profile.id == "gemini":
+        key_prefix, key_pattern = "AIzaSy", r"^AIzaSy[a-zA-Z0-9_-]{20,}$"
+    elif profile.id in {"openai", "deepseek", "moonshot"}:
+        key_prefix, key_pattern = "sk-", r"^sk-[a-zA-Z0-9_-]{10,}$"
+    elif profile.requires_api_key:
+        key_prefix, key_pattern = "", r"^.{10,}$"
+    else:
+        key_prefix, key_pattern = "", r".*"
+    return ServiceConfig(
+        name=profile.label,
+        key_prefix=key_prefix,
+        key_pattern=key_pattern,
+        key_env_var=f"{profile.env_prefix}_API_KEY",
+        url_env_var=f"{profile.env_prefix}_BASE_URL",
+        model_env_var=f"{profile.env_prefix}_MODEL",
+        default_url=profile.base_url,
+        default_model=profile.default_model,
+        description=profile.description,
+    )
 
 
 class SecretsManager:
@@ -67,72 +92,8 @@ class SecretsManager:
 
     # 服务配置
     SERVICE_CONFIGS: Dict[str, ServiceConfig] = {
-        "openai": ServiceConfig(
-            name="OpenAI",
-            key_prefix="sk-",
-            key_pattern=r"^sk-[a-zA-Z0-9]{20,}$",
-            key_env_var="OPENAI_API_KEY",
-            url_env_var="OPENAI_BASE_URL",
-            model_env_var="OPENAI_MODEL",
-            default_url="https://api.openai.com/",
-            default_model="gpt-4-turbo",
-            description="OpenAI API"
-        ),
-        "openai_proxy": ServiceConfig(
-            name="OpenAI Proxy",
-            key_prefix="",
-            key_pattern=r".{5,}",
-            key_env_var="OPENAI_PROXY_API_KEY",
-            url_env_var="OPENAI_PROXY_BASE_URL",
-            model_env_var="OPENAI_PROXY_MODEL",
-            default_url="",
-            default_model="gpt-4-turbo",
-            description="OpenAI代理服务"
-        ),
-        "gemini": ServiceConfig(
-            name="Google Gemini",
-            key_prefix="AIzaSy",
-            key_pattern=r"^AIzaSy[a-zA-Z0-9_-]{20,}$",
-            key_env_var="GEMINI_API_KEY",
-            url_env_var="GEMINI_BASE_URL",
-            model_env_var="GEMINI_MODEL",
-            default_url="https://generativelanguage.googleapis.com/",
-            default_model="gemini-1.5-pro",
-            description="Google Gemini API"
-        ),
-        "deepseek": ServiceConfig(
-            name="DeepSeek",
-            key_prefix="sk-",
-            key_pattern=r"^sk-[a-zA-Z0-9]{20,}$",
-            key_env_var="DEEPSEEK_API_KEY",
-            url_env_var="DEEPSEEK_BASE_URL",
-            model_env_var="DEEPSEEK_MODEL",
-            default_url="https://api.deepseek.com/",
-            default_model="deepseek-chat",
-            description="DeepSeek API"
-        ),
-        "moonshot": ServiceConfig(
-            name="Moonshot",
-            key_prefix="sk-",
-            key_pattern=r"^sk-[a-zA-Z0-9]{20,}$",
-            key_env_var="MOONSHOT_API_KEY",
-            url_env_var="MOONSHOT_BASE_URL",
-            model_env_var="MOONSHOT_MODEL",
-            default_url="https://api.moonshot.cn/",
-            default_model="moonshot-v1-8k",
-            description="月之暗面Kimi API"
-        ),
-        "ollama": ServiceConfig(
-            name="Ollama",
-            key_prefix="",
-            key_pattern=r".*",
-            key_env_var="OLLAMA_API_KEY",
-            url_env_var="OLLAMA_BASE_URL",
-            model_env_var="OLLAMA_MODEL",
-            default_url="http://localhost:11434/",
-            default_model="llama2",
-            description="本地Ollama服务"
-        ),
+        service_id: _service_config(profile)
+        for service_id, profile in PROVIDER_PROFILES.items()
     }
 
     # 占位符密钥列表（不应该使用的密钥）
@@ -144,6 +105,7 @@ class SecretsManager:
         "AIzaSy_your_gemini_api_key_here",
         "AIzaSy_your_key_here",
         "sk-your_deepseek_api_key",
+        "your_zhipu_api_key",
         "sk-your_moonshot_api_key_here",
         "sk-your_moonshot_api_key",
         "your-api-key-here",

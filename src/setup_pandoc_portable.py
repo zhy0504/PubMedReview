@@ -12,6 +12,7 @@ import zipfile
 import tarfile
 from pathlib import Path
 import tempfile
+import argparse
 
 def get_system_info():
     """获取系统信息"""
@@ -73,7 +74,7 @@ def get_latest_pandoc_version():
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return data['tag_name']
+        return data['tag_name'].lstrip('v')
     except Exception as e:
         print(f"获取版本信息失败，使用默认版本: {e}")
         return "3.1.8"  # 回退版本
@@ -101,23 +102,8 @@ def download_pandoc(os_name, arch, version):
     print(f"目标平台: {os_name} {arch}")
     print()
     
-    # 询问用户是否使用国内代理加速
-    print("是否启用国内代理加速下载？(推荐中国大陆用户选择)")
-    print("1. 是 - 使用 gh-proxy.com 代理加速")
-    print("2. 否 - 直连GitHub下载")
-    
-    try:
-        choice = input("请选择 (1/2，默认为1): ").strip()
-        if choice == "" or choice == "1":
-            url = f"https://gh-proxy.com/{base_url}"
-            print(f"✅ 已启用代理加速下载")
-        else:
-            url = base_url
-            print(f"✅ 使用直连下载")
-    except (EOFError, KeyboardInterrupt):
-        # 处理非交互环境，默认使用代理
-        url = f"https://gh-proxy.com/{base_url}"
-        print(f"⚠️  非交互环境，默认启用代理加速")
+    url = base_url
+    print("使用官方 GitHub Releases 地址下载")
     
     print(f"下载地址: {url}")
     print(f"备用地址: {base_url}")
@@ -134,7 +120,7 @@ def download_pandoc(os_name, arch, version):
             total_size = int(response.headers.get('content-length', 0))
             
             # 保存到临时文件，显示进度
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1], dir=Path(__file__).resolve().parents[1] / 'tools') as tmp_file:
                 if total_size > 0:
                     print(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
                     downloaded = 0
@@ -165,18 +151,8 @@ def download_pandoc(os_name, arch, version):
         print(f"下载失败: {e}")
         
         # 如果使用了代理且失败，尝试直连下载
-        if "gh-proxy.com" in url:
-            print("⚠️  代理下载失败，正在尝试直连GitHub下载...")
-            try:
-                temp_path = download_with_progress(base_url, "直连下载")
-                print("✅ 直连下载成功")
-                return temp_path, extract_func
-                
-            except Exception as direct_e:
-                print(f"❌ 直连下载也失败: {direct_e}")
-                return None, None
-        else:
-            return None, None
+        print(f"下载失败: {e}")
+        return None, None
 
 def extract_zip(zip_path, target_dir):
     """解压ZIP文件"""
@@ -188,7 +164,7 @@ def extract_tar(tar_path, target_dir):
     with tarfile.open(tar_path, 'r:gz') as tar_ref:
         tar_ref.extractall(target_dir)
 
-def setup_pandoc_portable():
+def setup_pandoc_portable(force=False):
     """设置便携版Pandoc"""
     # 项目根目录 - 修改为实际项目根目录
     project_root = Path(__file__).parent.parent
@@ -205,7 +181,7 @@ def setup_pandoc_portable():
     exec_name = "pandoc.exe" if os_name == 'windows' else "pandoc"
     pandoc_exec = target_dir / exec_name
     
-    if pandoc_exec.exists():
+    if pandoc_exec.exists() and not force:
         print(f"Pandoc便携版已存在: {pandoc_exec}")
         print("如需重新安装，请先删除tools/pandoc目录")
         return str(pandoc_exec)
@@ -224,7 +200,7 @@ def setup_pandoc_portable():
         print("解压文件...")
         
         # 解压到临时目录
-        with tempfile.TemporaryDirectory() as temp_extract_dir:
+        with tempfile.TemporaryDirectory(dir=project_root / 'tools') as temp_extract_dir:
             extract_func(temp_file, temp_extract_dir)
             
             # 查找pandoc可执行文件
@@ -271,7 +247,10 @@ def main():
     print("Pandoc便携版安装脚本")
     print("=" * 50)
     
-    pandoc_path = setup_pandoc_portable()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--update', action='store_true')
+    args = parser.parse_args()
+    pandoc_path = setup_pandoc_portable(force=args.update)
     
     if pandoc_path:
         print("\n安装成功!")
@@ -289,12 +268,15 @@ def main():
                 print(f"测试成功: {version_line}")
             else:
                 print("Pandoc测试失败")
+                raise SystemExit(1)
         except Exception as e:
             print(f"测试失败: {e}")
+            raise SystemExit(1)
             
     else:
         print("\n安装失败")
         print("请手动安装Pandoc: https://pandoc.org/installing.html")
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()

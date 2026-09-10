@@ -263,7 +263,7 @@ class PromptsManager:
             bool: 验证通过返回True
         """
         required_categories = ['intent_analysis', 'outline_generation', 'review_generation']
-        required_fields = ['system_prompt', 'user_prompt_template']
+        required_fields = ['user_prompt_template']
         
         missing_items = []
         

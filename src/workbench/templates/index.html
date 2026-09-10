@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="workbench-token" content="{{ token }}">
+  <title>文献研读 · 智能综述工作台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='functional-layout.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至主要内容</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="文献研读首页"><span class="brand-mark">研</span><span>文献研读</span></a>
+    <div class="sidebar-label">研究空间</div>
+    <nav aria-label="主导航">
+      <button class="nav-item active" data-view="system"><span aria-hidden="true">✓</span>系统状态</button>
+      <button class="nav-item" data-view="workspace"><span aria-hidden="true">◫</span>研究工作台</button>
+      <button class="nav-item" data-view="history"><span aria-hidden="true">◷</span>历史检索<span class="nav-count" id="history-count">0</span></button>
+      <button class="nav-item" data-view="settings"><span aria-hidden="true">⚙</span>配置</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span><div>本地研究空间<small>SQLite 存储 · 仅本机访问</small></div></div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><div>我的研究空间 <span class="slash">/</span> <span id="breadcrumb">研究工作台</span></div><span class="local-badge"><span class="status-dot"></span>本地运行</span></header>
+    <div class="page">
+      <section id="view-system" class="view">
+        <div class="page-heading"><h1>系统状态</h1></div><section class="card settings-card"><dl id="system-status"></dl><div id="system-actions"></div><button id="refresh-system-status" class="button">重新检测</button></section>
+      </section>
+      <section id="view-workspace" class="view" hidden>
+        <div class="page-heading"><div><h1>研究工作台</h1></div><button class="button secondary" id="show-history">查看历史 <span aria-hidden="true">↗</span></button></div>
+        <div class="stats" aria-label="研究概况"><div><span class="stat-icon">◫</span><span><small>历史任务</small><strong id="stat-tasks">0</strong></span></div><div><span class="stat-icon">✓</span><span><small>完成综述</small><strong id="stat-completed">0</strong></span></div><div><span class="stat-icon">≡</span><span><small>已保存文献 <span class="muted">· PMID 去重</span></small><strong id="stat-articles">0</strong></span></div></div>
+        <div class="workspace-grid">
+          <div class="workspace-main">
+            <section class="card composer" aria-labelledby="composer-title"><div class="section-heading"><div><span class="section-number">01</span><h2 id="composer-title">文献检索</h2></div><span class="subtle-badge">PubMed</span></div>
+              <form id="search-form">
+                <label for="query">检索需求</label>
+                <textarea id="query" name="query" rows="3" maxlength="5000" required placeholder="主题或研究问题，例如：结核病患者管理中的数字健康干预研究进展"></textarea>
+                <div class="form-row"><div><label for="year-start">起始年份&nbsp;—&nbsp;终止年份</label><div class="inline-fields"><input id="year-start" type="number" min="1900" max="{{ current_year }}" placeholder="不限"><span>—</span><input id="year-end" type="number" min="1900" max="{{ current_year }}" placeholder="当前年份"></div></div><div><label for="if-min">最低影响因子</label><input id="if-min" type="number" min="0" max="100" step="0.1" placeholder="不限"></div></div>
+                <div class="form-row"><div><label for="new-rui-2026">新锐 2026 分区</label><input id="new-rui-2026" type="range" min="0" max="4" value="0"><output id="new-rui-2026-value">不限</output></div><div><label for="jcr-range">JCR 分区</label><input id="jcr-range" type="range" min="0" max="4" value="0"><output id="jcr-range-value">不限</output></div><div><label for="cas-range">中科院分区</label><input id="cas-range" type="range" min="0" max="4" value="0"><output id="cas-range-value">不限</output></div></div>
+                <div class="form-row"><div><label for="target">目标筛选篇数</label><input id="target" type="number" min="1" max="10000" value="50" required></div></div>
+                <div class="form-footer"><span><span class="status-dot"></span>任务与结果自动保存至本地</span><button class="button primary" id="start-button" type="submit">开始检索 <span aria-hidden="true">→</span></button></div>
+              </form>
+            </section>
+            <section class="card result-card" aria-labelledby="result-heading"><div class="section-heading"><div><span class="section-number">02</span><h2 id="result-heading">研究结果</h2></div><span id="job-badge" class="subtle-badge">等待开始</span></div>
+              <div id="job-summary" class="job-summary" hidden><h3 id="job-query"></h3><div id="job-meta" class="muted"></div><div class="job-actions"><button id="rerun-button" class="button small secondary">复用条件</button><button id="cancel-button" class="button small danger" hidden>取消任务</button></div></div>
+              <div id="workflow-steps" class="steps"><span data-stage="intent"><b>1</b>意图分析</span><span data-stage="search"><b>2</b>文献检索</span><span data-stage="outline"><b>3</b>构建大纲</span><span data-stage="review"><b>4</b>生成综述</span></div>
+              <div id="prompt-panel" class="prompt-panel" hidden><strong>检索结果确认</strong><p id="prompt-text"></p><p id="result-count-confirm"></p><form id="prompt-form"><input id="prompt-value" aria-label="交互回答" maxlength="5000" autocomplete="off"><button id="prompt-submit" class="button primary small">发送回答</button></form><button id="start-review" class="button primary" hidden>开始综述</button><button id="adjust-search" class="button secondary" hidden>调整条件重新检索</button></div>
+              <div id="job-error" class="error-panel" role="alert" hidden></div>
+              <div class="tabs" role="tablist" aria-label="结果类型"><button role="tab" aria-selected="true" aria-controls="tab-articles" id="trigger-articles" data-tab="articles" class="active">文献 <span id="article-count">0</span></button><button role="tab" aria-selected="false" aria-controls="tab-outline" id="trigger-outline" data-tab="outline">综述大纲</button><button role="tab" aria-selected="false" aria-controls="tab-review" id="trigger-review" data-tab="review">综述正文</button><button role="tab" aria-selected="false" aria-controls="tab-logs" id="trigger-logs" data-tab="logs">运行日志</button></div>
+              <div id="tab-articles" class="tab-panel" role="tabpanel" aria-labelledby="trigger-articles"><div id="article-toolbar" class="table-toolbar" hidden><input id="article-search" type="search" placeholder="在当前结果中搜索标题、期刊或 PMID" aria-label="搜索当前文献"><span id="article-total" class="muted"></span></div><div id="article-list"><div class="empty-state"><p>暂无文献结果</p></div></div><div class="pagination" id="article-pagination" hidden><button class="button small secondary" id="articles-prev">上一页</button><span id="articles-page"></span><button class="button small secondary" id="articles-next">下一页</button></div></div>
+              <div id="tab-outline" class="tab-panel" role="tabpanel" aria-labelledby="trigger-outline" hidden><pre id="outline-content" class="document-preview">大纲生成后可在这里查看。</pre></div>
+              <div id="tab-review" class="tab-panel" role="tabpanel" aria-labelledby="trigger-review" hidden><pre id="review-content" class="document-preview">正文生成后可在这里查看。DOCX 文件请在成果文件中下载。</pre></div>
+              <div id="tab-logs" class="tab-panel" role="tabpanel" aria-labelledby="trigger-logs" hidden><p class="log-note">显示最近运行信息；日志有长度限制，历史文献和成果文件独立保存。</p><pre id="log-content" class="logs" aria-label="任务日志">尚无运行日志。</pre></div>
+            </section>
+          </div>
+          <aside class="right-rail">
+              <section class="card artifacts"><h2>成果文件 <span id="artifact-count" class="muted">0</span></h2><div id="artifact-list"><p class="muted">筛选后的文献列表、最终综述文章和最终纳入综述文献 RIS 会出现在这里。</p></div></section>
+          </aside>
+        </div>
+      </section>
+      <section id="view-history" class="view" hidden><div class="page-heading"><div><h1>历史检索</h1></div><div class="history-actions"><button class="button danger" id="clear-selected-history" disabled>清理所选</button><button class="button primary" id="new-search">新建检索 +</button></div></div><section class="card history-card"><div class="history-toolbar"><button id="select-all-history" class="button secondary small">全选</button><input id="history-search" type="search" placeholder="搜索研究主题、文献标题或 PMID" aria-label="搜索历史"><select id="history-status" aria-label="筛选任务状态"><option value="">全部状态</option><option value="completed">已完成</option><option value="running">运行中</option><option value="waiting">待确认</option><option value="failed">失败</option><option value="stopped">已停止生成</option><option value="cancelled">已取消</option><option value="interrupted">已中断</option></select></div><div id="history-list"></div><div class="pagination"><button id="history-prev" class="button secondary small">上一页</button><span id="history-page"></span><button id="history-next" class="button secondary small">下一页</button></div></section></section>
+      <section id="view-settings" class="view" hidden>
+        <div class="page-heading"><h1>配置</h1></div>
+        <section class="card settings-card"><h2>AI 与输出配置</h2>
+          <div class="settings-form">
+            <div><label for="setting-provider">AI 服务</label><select id="setting-provider"></select><small id="provider-hint">可选 OpenAI 兼容服务；选择后会填入推荐地址和默认模型。</small></div>
+            <div><label for="setting-protocol">接口类型</label><select id="setting-protocol"><option value="openai">OpenAI Chat Completions</option><option value="openai_responses">OpenAI Responses</option></select></div>
+            <div><label for="setting-base-url">API 基础地址</label><input id="setting-base-url" type="url" placeholder="选择服务后自动填入，也可手动修改"><small id="base-url-hint">兼容代理请填写服务商要求的完整 API 基础地址。</small></div>
+            <div><label for="setting-api-key">AI API Key</label><input id="setting-api-key" type="password" autocomplete="new-password" placeholder="留空保留已配置密钥"></div>
+            <div><label for="setting-pubmed-key">PubMed API Key</label><input id="setting-pubmed-key" type="password" autocomplete="new-password" placeholder="留空保留已配置密钥"><small id="pubmed-key-status"></small></div>
+            <div><label for="setting-model">通用模型（未单独设置时使用）</label><input id="setting-model" maxlength="150" list="model-list" placeholder="获取后选择或手动填写"><datalist id="model-list"></datalist><button id="fetch-models" type="button" class="button">获取模型列表</button><small id="model-status"></small></div>
+            <div><label>意图分析</label><input id="setting-intent-model" list="model-list" placeholder="模型"><select id="setting-intent-reasoning"><option>none</option><option>minimal</option><option selected>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div>
+            <div><label>大纲生成</label><input id="setting-outline-model" list="model-list" placeholder="模型"><select id="setting-outline-reasoning"><option>none</option><option>minimal</option><option selected>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div>
+            <div><label>综述生成</label><input id="setting-review-model" list="model-list" placeholder="模型"><select id="setting-review-reasoning"><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option selected>medium</option><option>max</option></select></div>
+            <div><label for="setting-max-tokens">最大输出令牌数（含推理）</label><input id="setting-max-tokens" type="number" min="1" max="100000" placeholder="接口默认"></div>
+            <div><label for="setting-format">综述输出格式</label><select id="setting-format"><option value="md">Markdown</option><option value="both">Markdown + DOCX（需安装 Pandoc）</option><option value="docx">DOCX（需安装 Pandoc）</option></select></div>
+          </div><button id="save-preferences" class="button primary">保存配置</button>
+          <section class="card settings-card"><h2>提示词配置</h2><div class="prompt-module"><label for="prompt-intent">意图分析提示词</label><textarea id="prompt-intent" rows="8" spellcheck="false"></textarea></div><div class="prompt-module"><label for="prompt-outline">大纲生成提示词</label><textarea id="prompt-outline" rows="8" spellcheck="false"></textarea></div><div class="prompt-module"><label for="prompt-review">综述生成提示词</label><textarea id="prompt-review" rows="8" spellcheck="false"></textarea></div><button id="save-prompts" class="button primary">保存提示词</button><small id="prompt-status"></small></section>
+        </section>
+      </section>
+    </div>
+  </main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="article-dialog"><div class="dialog-header"><strong>文献详情</strong><button id="close-article" class="button secondary small">关闭</button></div><h2 id="detail-title"></h2><div id="detail-meta" class="muted"></div><h3>摘要</h3><p id="detail-abstract"></p><details><summary>完整原始元数据</summary><pre id="detail-json"></pre></details></dialog>
+</body>
+</html>
+
+
+
+
+

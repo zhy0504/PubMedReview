@@ -109,11 +109,14 @@ class JournalInfoCache:
         }
 
 
+from journal_data import load_journal_table, source_digest
+
+
 class LiteratureFilter:
     """文献筛选器"""
     
-    def __init__(self, zky_data_path: str = "data/processed_zky_data.csv", 
-                 jcr_data_path: str = "data/processed_jcr_data.csv",
+    def __init__(self, zky_data_path: str = "data/FQBJCR2025-UTF8.csv", 
+                 jcr_data_path: str = "data/JCR2025-UTF8.csv",
                  config: FilterConfig = None):
         """
         初始化文献筛选器
@@ -143,9 +146,13 @@ class LiteratureFilter:
         # 加载期刊数据
         self.zky_data = self._load_zky_data_optimized()
         self.jcr_data = self._load_jcr_data_optimized()
+        self.new_rui_data = self._load_new_rui_data()
         
         # 创建ISSN到期刊信息的映射（支持缓存）
         self.issn_to_journal_info = self._load_or_build_journal_mapping()
+        self.journal_name_to_info = self._build_journal_name_mapping()
+        for key, zone in self.new_rui_data.items():
+            self.issn_to_journal_info.setdefault(key, {}).update({'new_rui_2026': True, 'new_rui_zone': zone})
         
         print(f"已加载中科院数据: {len(self.zky_data)} 条记录")
         print(f"已加载JCR数据: {len(self.jcr_data)} 条记录")
@@ -154,36 +161,8 @@ class LiteratureFilter:
         print(f"缓存系统: {'启用' if self.config.enable_caching else '禁用'}")
     
     def _load_zky_data_optimized(self) -> pd.DataFrame:
-        """优化的中科院数据加载方法"""
-        try:
-            if not os.path.exists(self.zky_data_path):
-                print(f"中科院数据文件不存在: {self.zky_data_path}")
-                return pd.DataFrame()
-            
-            # 使用分块读取减少内存使用
-            chunks = []
-            for chunk in pd.read_csv(self.zky_data_path, encoding='utf-8', chunksize=1000):
-                # 数据清洗和优化
-                chunk = self._clean_journal_data(chunk)
-                chunks.append(chunk)
-                
-                # 内存检查
-                if self._check_memory_limit():
-                    print("内存使用接近限制，停止加载数据")
-                    break
-            
-            if chunks:
-                df = pd.concat(chunks, ignore_index=True)
-                print(f"成功加载中科院数据: {len(df)} 条记录")
-                return df
-            else:
-                return pd.DataFrame()
-                
-        except Exception as e:
-            print(f"加载中科院数据失败: {e}")
-            self.performance_stats['errors'] += 1
-            return pd.DataFrame()
-    
+        return load_journal_table(self.zky_data_path, self._clean_journal_data)
+
     def _load_zky_data(self) -> pd.DataFrame:
         """兼容性方法 - 已废弃，请使用 _load_zky_data_optimized"""
         import warnings
@@ -191,36 +170,51 @@ class LiteratureFilter:
         return self._load_zky_data_optimized()
     
     def _load_jcr_data_optimized(self) -> pd.DataFrame:
-        """优化的JCR数据加载方法"""
+        return load_journal_table(self.jcr_data_path, self._clean_journal_data)
+
+    def _load_new_rui_data(self) -> dict:
+        path = os.path.join(os.path.dirname(self.zky_data_path), 'XR2026-UTF8.csv')
+        if not os.path.isfile(path):
+            path = os.path.join('data', 'XR2026-UTF8.csv')
+        if not os.path.isfile(path):
+            return {}
         try:
-            if not os.path.exists(self.jcr_data_path):
-                print(f"JCR数据文件不存在: {self.jcr_data_path}")
-                return pd.DataFrame()
-            
-            # 使用分块读取减少内存使用
-            chunks = []
-            for chunk in pd.read_csv(self.jcr_data_path, encoding='utf-8', chunksize=1000):
-                # 数据清洗和优化
-                chunk = self._clean_journal_data(chunk)
-                chunks.append(chunk)
-                
-                # 内存检查
-                if self._check_memory_limit():
-                    print("内存使用接近限制，停止加载数据")
-                    break
-            
-            if chunks:
-                df = pd.concat(chunks, ignore_index=True)
-                print(f"成功加载JCR数据: {len(df)} 条记录")
-                return df
-            else:
-                return pd.DataFrame()
-                
-        except Exception as e:
-            print(f"加载JCR数据失败: {e}")
-            self.performance_stats['errors'] += 1
-            return pd.DataFrame()
-    
+            frame = pd.read_csv(path, encoding='utf-8', low_memory=False)
+        except UnicodeDecodeError:
+            frame = pd.read_csv(path, encoding='gb18030', low_memory=False)
+        values = {}
+        zone_column = '大类新锐分区'
+        if zone_column not in frame.columns:
+            raise ValueError('新锐2026数据缺少大类新锐分区列')
+        for column in ('ISSN', 'EISSN'):
+            if column in frame.columns:
+                for index, value in frame[column].items():
+                    key = str(value).strip().upper().replace('-', '')
+                    if not key or key == 'NAN':
+                        continue
+                    match = re.search(r'([1-4])', str(frame.loc[index, zone_column])) if zone_column else None
+                    if match:
+                        values[key] = int(match.group(1))
+        return values
+
+    def _build_journal_name_mapping(self) -> Dict[str, Dict]:
+        result = {}
+        for frame in (self.zky_data, self.jcr_data):
+            if 'Journal' not in frame.columns:
+                continue
+            for _, row in frame.iterrows():
+                name = str(row.get('Journal', '')).strip().upper()
+                if not name or name == 'NAN':
+                    continue
+                info = {}
+                if '中科院分区' in row and pd.notna(row.get('中科院分区')):
+                    info['cas_zone'] = row.get('中科院分区')
+                if 'IF(2025)' in row and pd.notna(row.get('IF(2025)')): info['impact_factor'] = row.get('IF(2025)')
+                if 'IF Quartile(2025)_1' in row and pd.notna(row.get('IF Quartile(2025)_1')): info['jcr_quartile'] = row.get('IF Quartile(2025)_1')
+                if info:
+                    result.setdefault(name, {}).update(info)
+        return result
+
     def _load_jcr_data(self) -> pd.DataFrame:
         """兼容性方法 - 已废弃，请使用 _load_jcr_data_optimized"""
         import warnings
@@ -230,20 +224,30 @@ class LiteratureFilter:
     def _clean_journal_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """清洗期刊数据"""
         try:
+            if 'ISSN/EISSN' in df.columns:
+                identifiers = df['ISSN/EISSN'].fillna('').astype(str).str.split('/', n=1, expand=True)
+                df['ISSN'] = identifiers[0]
+                df['EISSN'] = identifiers[1] if 1 in identifiers.columns else ''
+            if '大类分区' in df.columns:
+                df['中科院分区'] = df['大类分区']
+            if 'IF(2025)' in df.columns:
+                df['影响因子'] = df['IF(2025)']
+            if 'IF Quartile(2025)_1' in df.columns:
+                df['JCR分区'] = df['IF Quartile(2025)_1'].astype('string').str.strip().str.upper()
             # 标准化ISSN格式
             if 'ISSN' in df.columns:
-                df['ISSN'] = df['ISSN'].astype(str).str.strip()
-                df['ISSN'] = df['ISSN'].replace('nan', '')
+                df['ISSN'] = df['ISSN'].astype(str).str.strip().str.upper().str.replace('-', '', regex=False)
+                df['ISSN'] = df['ISSN'].replace({'NAN': '', 'NONE': '', '<NA>': ''})
             
             if 'EISSN' in df.columns:
-                df['EISSN'] = df['EISSN'].astype(str).str.strip()
-                df['EISSN'] = df['EISSN'].replace('nan', '')
+                df['EISSN'] = df['EISSN'].astype(str).str.strip().str.upper().str.replace('-', '', regex=False)
+                df['EISSN'] = df['EISSN'].replace({'NAN': '', 'NONE': '', '<NA>': ''})
             
             # 处理数值字段
-            numeric_columns = ['影响因子', '中科院分区']
+            numeric_columns = ['影响因子', '中科院分区', 'IF(2025)']
             for col in numeric_columns:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    df[col] = pd.to_numeric(df[col].astype(str).str.extract(r'(\d+(?:\.\d+)?)')[0], errors='coerce')
             
             return df
         except Exception as e:
@@ -310,7 +314,7 @@ class LiteratureFilter:
                     future = executor.submit(self._process_chunk, chunk, data_type)
                     futures.append(future)
                 
-                for future in as_completed(futures):
+                for future in futures:
                     try:
                         chunk_mapping = future.result()
                         mapping.update(chunk_mapping)
@@ -329,9 +333,10 @@ class LiteratureFilter:
         
         if data_type == 'zky':
             # 处理中科院数据
-            if 'ISSN' in df.columns:
-                issns = df['ISSN'].astype(str).str.strip()
-                cas_zones = df['中科院分区'] if '中科院分区' in df.columns else None
+            issn_col = 'ISSN' if 'ISSN' in df.columns else ('ISSN/EISSN' if 'ISSN/EISSN' in df.columns else None)
+            if issn_col:
+                issns = df[issn_col].astype(str).str.split('/').str[0].str.strip()
+                cas_zones = df['中科院分区'] if '中科院分区' in df.columns else (df.iloc[:, 9] if len(df.columns) > 9 else None)
                 
                 # 过滤有效的ISSN
                 valid_mask = (issns != '') & (issns != 'nan') & issns.notna()
@@ -381,8 +386,8 @@ class LiteratureFilter:
             # 处理JCR数据
             if 'ISSN' in df.columns:
                 issns = df['ISSN'].astype(str).str.strip()
-                impact_factors = df['影响因子'] if '影响因子' in df.columns else None
-                jcr_quartiles = df['JCR分区'] if 'JCR分区' in df.columns else None
+                impact_factors = df['影响因子'] if '影响因子' in df.columns else (df['IF(2025)'] if 'IF(2025)' in df.columns else None)
+                jcr_quartiles = df['JCR分区'] if 'JCR分区' in df.columns else (df['IF Quartile(2025)_1'] if 'IF Quartile(2025)_1' in df.columns else None)
                 
                 valid_mask = (issns != '') & (issns != 'nan') & issns.notna()
                 valid_issns = issns[valid_mask]
@@ -443,21 +448,14 @@ class LiteratureFilter:
         return "cache/journal_mapping_cache.json.gz"  # 使用安全的json+gzip格式
     
     def _get_data_files_hash(self) -> str:
-        """计算数据文件的哈希值，用于检测文件是否有更新"""
-        hash_obj = hashlib.sha256()  # 使用更安全的SHA256算法
+        paths = (self.zky_data_path, self.jcr_data_path, os.path.join(os.path.dirname(self.zky_data_path), 'XR2026-UTF8.csv'))
+        paths = paths + ('mapping-schema-v4',)
+        signature = tuple((os.path.abspath(path), os.stat(path).st_size, os.stat(path).st_mtime_ns) if os.path.exists(path) else (path, None) for path in paths)
+        if getattr(self, '_source_signature', None) != signature:
+            self._source_digest = source_digest(paths)
+            self._source_signature = signature
+        return self._source_digest
 
-        # 计算中科院数据文件的哈希
-        if os.path.exists(self.zky_data_path):
-            with open(self.zky_data_path, 'rb') as f:
-                hash_obj.update(f.read())
-
-        # 计算JCR数据文件的哈希
-        if os.path.exists(self.jcr_data_path):
-            with open(self.jcr_data_path, 'rb') as f:
-                hash_obj.update(f.read())
-
-        return hash_obj.hexdigest()
-    
     def _load_mapping_cache(self) -> Optional[Dict[str, Dict]]:
         """加载期刊映射表缓存（使用安全的json格式）"""
         cache_path = self._get_mapping_cache_path()
@@ -481,7 +479,7 @@ class LiteratureFilter:
             if current_hash != cached_hash:
                 print(f"[CACHE] 数据文件已更新，缓存失效")
                 return None
-            elif cache_age_days > CACHE_EXPIRY_DAYS:
+            elif cache_data.get('version') != '3.0' or cache_age_days > CACHE_EXPIRY_DAYS:
                 print(f"[CACHE] 缓存已过期 ({cache_age_days:.1f}天)，将重新构建")
                 return None
             else:
@@ -507,7 +505,7 @@ class LiteratureFilter:
                 'mapping': mapping,
                 'data_hash': self._get_data_files_hash(),
                 'cached_at': time.time(),
-                'version': '2.0'  # 更新版本号表示格式变更
+                'version': '3.0'
             }
 
             # 使用gzip+json替代pickle，避免反序列化攻击
@@ -547,7 +545,7 @@ class LiteratureFilter:
         else:
             print("[CACHE] 缓存文件不存在")
     
-    def get_journal_info_optimized(self, issn: str, eissn: str) -> Dict:
+    def get_journal_info_optimized(self, issn: str, eissn: str, journal: str = '') -> Dict:
         """
         优化的期刊信息获取方法，支持缓存
         
@@ -562,7 +560,8 @@ class LiteratureFilter:
         cached_info = self.journal_cache.get(issn, eissn)
         if cached_info:
             self.performance_stats['cache_hits'] += 1
-            return cached_info
+            if not journal:
+                return cached_info
         
         journal_info = {
             'cas_zone': None,
@@ -572,21 +571,34 @@ class LiteratureFilter:
         
         # 优先使用ISSN查找
         if issn and issn.strip():
-            clean_issn = issn.strip()
+            clean_issn = issn.strip().upper().replace('-', '')
             if clean_issn in self.issn_to_journal_info:
                 info = self.issn_to_journal_info[clean_issn]
                 journal_info.update({k: v for k, v in info.items() if v is not None})
         
         # 如果ISSN没找到或信息不完整，尝试eISSN
         if eissn and eissn.strip():
-            clean_eissn = eissn.strip()
+            clean_eissn = eissn.strip().upper().replace('-', '')
             if clean_eissn in self.issn_to_journal_info:
                 info = self.issn_to_journal_info[clean_eissn]
                 # 只更新为None的字段
                 for key, value in info.items():
-                    if journal_info[key] is None and value is not None:
+                    if journal_info.get(key) is None and value is not None:
                         journal_info[key] = value
+        if journal and journal.strip():
+            info = self.journal_name_to_info.get(journal.strip().upper())
+            if info:
+                journal_info.update({k: v for k, v in info.items() if journal_info.get(k) is None})
         
+        if journal_info.get('impact_factor') is None and not self.jcr_data.empty:
+            keys = {str(value).strip().upper().replace('-', '') for value in (issn, eissn) if value}
+            for _, row in self.jcr_data.iterrows():
+                row_keys = {str(row.get(col, '')).strip().upper().replace('-', '') for col in ('ISSN', 'EISSN')}
+                if keys & row_keys:
+                    if pd.notna(row.get('IF(2025)')): journal_info['impact_factor'] = float(row.get('IF(2025)'))
+                    if pd.notna(row.get('IF Quartile(2025)_1')): journal_info['jcr_quartile'] = str(row.get('IF Quartile(2025)_1'))
+                    break
+
         # 缓存结果
         self.journal_cache.put(issn, eissn, journal_info)
         
@@ -789,7 +801,7 @@ class LiteratureFilter:
         
         # 快速检查：如果没有设置任何筛选条件，直接返回True
         if (not criteria.min_if and not criteria.max_if and 
-            not criteria.cas_zones and not criteria.jcr_quartiles):
+            not criteria.cas_zones and not criteria.jcr_quartiles and not getattr(criteria, 'new_rui_2026', False)):
             return True
         
         # 获取期刊信息
@@ -827,6 +839,9 @@ class LiteratureFilter:
             jcr_quartile = journal_info.get('jcr_quartile')
             if not jcr_quartile or str(jcr_quartile) not in criteria.jcr_quartiles:
                 return False
+
+        if criteria.new_rui_2026 and journal_info.get('new_rui_zone') not in criteria.new_rui_2026:
+            return False
         
           
         return True

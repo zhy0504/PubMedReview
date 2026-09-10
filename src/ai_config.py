@@ -21,6 +21,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+from ai_providers import PROVIDER_PROFILES
+from openai_protocol import is_deepseek_url, is_zhipu_url
 
 # 尝试加载 python-dotenv（如果可用）
 try:
@@ -85,6 +87,7 @@ class AIServiceConfig:
     timeout: int = 300
     status: str = "active"
     description: str = ""
+    requires_api_key: bool = True
 
     def is_active(self) -> bool:
         """检查服务是否激活"""
@@ -92,7 +95,7 @@ class AIServiceConfig:
 
     def is_valid(self) -> bool:
         """检查配置是否有效"""
-        if not self.api_key or self.api_key.startswith("sk-your"):
+        if self.requires_api_key and (not self.api_key or self.api_key.startswith("sk-your")):
             return False
         if not self.base_url:
             return False
@@ -112,46 +115,18 @@ class AIConfigManager:
 
     # 支持的服务列表及其环境变量前缀
     SERVICE_PREFIXES = {
-        "openai": ("OPENAI", "openai"),
-        "openai_proxy": ("OPENAI_PROXY", "openai"),
-        "gemini": ("GEMINI", "gemini"),
-        "deepseek": ("DEEPSEEK", "openai"),
-        "moonshot": ("MOONSHOT", "openai"),
-        "ollama": ("OLLAMA", "openai"),
+        service_id: (profile.env_prefix, profile.api_type)
+        for service_id, profile in PROVIDER_PROFILES.items()
     }
 
     # 默认配置
     DEFAULTS = {
-        "openai": {
-            "base_url": "https://api.openai.com/",
-            "model": "gpt-4-turbo",
-            "description": "OpenAI官方API"
-        },
-        "openai_proxy": {
-            "base_url": "",
-            "model": "gpt-4-turbo",
-            "description": "OpenAI代理服务"
-        },
-        "gemini": {
-            "base_url": "https://generativelanguage.googleapis.com/",
-            "model": "gemini-1.5-pro",
-            "description": "Google Gemini API"
-        },
-        "deepseek": {
-            "base_url": "https://api.deepseek.com/",
-            "model": "deepseek-chat",
-            "description": "DeepSeek API"
-        },
-        "moonshot": {
-            "base_url": "https://api.moonshot.cn/",
-            "model": "moonshot-v1-8k",
-            "description": "月之暗面Kimi API"
-        },
-        "ollama": {
-            "base_url": "http://localhost:11434/",
-            "model": "llama2",
-            "description": "本地Ollama服务"
-        },
+        service_id: {
+            "base_url": profile.base_url,
+            "model": profile.default_model,
+            "description": profile.description,
+        }
+        for service_id, profile in PROVIDER_PROFILES.items()
     }
 
     _instance: Optional['AIConfigManager'] = None
@@ -246,24 +221,36 @@ class AIConfigManager:
         defaults = self.DEFAULTS.get(service_name, {})
 
         api_key = os.environ.get(f"{prefix}_API_KEY", "")
-        base_url = os.environ.get(f"{prefix}_BASE_URL", defaults.get("base_url", ""))
-        model = os.environ.get(f"{prefix}_MODEL", defaults.get("model", ""))
+        configured_base_url = os.environ.get(f"{prefix}_BASE_URL")
+        configured_model = os.environ.get(f"{prefix}_MODEL")
+        configured_status = os.environ.get(f"{prefix}_STATUS")
+        base_url = configured_base_url or defaults.get("base_url", "")
+        model = configured_model if configured_model is not None and configured_model.strip() else defaults.get("model", "")
+        if (not configured_model or not configured_model.strip()) and is_deepseek_url(base_url):
+            model = self.DEFAULTS['deepseek']['model']
+        elif (not configured_model or not configured_model.strip()) and is_zhipu_url(base_url):
+            model = self.DEFAULTS['zhipu']['model']
         timeout = self._safe_int(os.environ.get(f"{prefix}_TIMEOUT", "300"), default=300, min_value=1)
-        status = os.environ.get(f"{prefix}_STATUS", "active" if api_key else "inactive")
+        profile = PROVIDER_PROFILES.get(service_name)
+        requires_api_key = profile.requires_api_key if profile else True
+        local_configured = bool(configured_base_url or configured_model or configured_status)
+        explicitly_selected = os.environ.get("DEFAULT_AI_SERVICE", "").strip().lower() == service_name
+        status = configured_status or ("active" if (api_key or (not requires_api_key and (local_configured or explicitly_selected))) else "inactive")
 
         # 检查是否为占位符
-        if self._is_placeholder(api_key):
+        if requires_api_key and self._is_placeholder(api_key):
             status = "inactive"
 
         return AIServiceConfig(
             name=service_name,
-            api_type=api_type,
+            api_type=os.environ.get(f'{prefix}_API_TYPE', api_type),
             api_key=api_key,
             base_url=base_url,
             model=model,
             timeout=timeout,
             status=status,
-            description=defaults.get("description", service_name)
+            description=defaults.get("description", service_name),
+            requires_api_key=requires_api_key,
         )
 
     def _load_settings(self):

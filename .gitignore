@@ -255,3 +255,16 @@ venv/
 .DS_Store
 Thumbs.db
 /.spec-workflow
+
+# Local workbench history and task workspaces
+workspace_data/
+release/
+local_archive/
+data/jcr_latest.csv
+workbench-tray-test.exe
+workbench-tray.build.exe
+*.before-*.py
+*.before-*.yaml
+*.backup-*.yaml
+*.bak
+tools/tmp*/

@@ -26,6 +26,8 @@ import json
 import pickle
 import time
 import threading
+from collections import OrderedDict
+from functools import wraps
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
@@ -93,10 +95,11 @@ class MemoryCache(CacheBase[T]):
     """
 
     def __init__(self, maxsize: int = 1000, ttl: Optional[float] = None):
+        if maxsize < 0:
+            raise ValueError("maxsize must be non-negative")
         self.maxsize = maxsize
         self.default_ttl = ttl
-        self._cache: Dict[str, CacheEntry[T]] = {}
-        self._access_order: list = []
+        self._cache = OrderedDict()
         self._lock = threading.RLock()
 
     def get(self, key: str, default: T = None) -> Optional[T]:
@@ -126,7 +129,6 @@ class MemoryCache(CacheBase[T]):
     def clear(self) -> None:
         with self._lock:
             self._cache.clear()
-            self._access_order.clear()
 
     def has(self, key: str) -> bool:
         with self._lock:
@@ -140,29 +142,24 @@ class MemoryCache(CacheBase[T]):
 
     def _update_access(self, key: str) -> None:
         """更新访问顺序（LRU）"""
-        if key in self._access_order:
-            self._access_order.remove(key)
-        self._access_order.append(key)
+        self._cache.move_to_end(key)
 
     def _remove(self, key: str) -> bool:
         """移除缓存项"""
         if key in self._cache:
             del self._cache[key]
-            if key in self._access_order:
-                self._access_order.remove(key)
             return True
         return False
 
     def _evict_if_needed(self) -> None:
         """LRU淘汰策略"""
         while len(self._cache) > self.maxsize:
-            if self._access_order:
-                oldest_key = self._access_order.pop(0)
-                self._cache.pop(oldest_key, None)
+            self._cache.popitem(last=False)
 
     def size(self) -> int:
         """返回当前缓存大小"""
-        return len(self._cache)
+        with self._lock:
+            return len(self._cache)
 
 
 class FileCache(CacheBase[T]):
@@ -309,16 +306,18 @@ def cached(
             return x + y
     """
     def decorator(func: Callable) -> Callable:
+        missing = object()
+        @wraps(func)
         def wrapper(*args, **kwargs):
             # 生成缓存key
             if key_builder:
                 cache_key = key_builder(*args, **kwargs)
             else:
-                cache_key = f"{func.__name__}:{args}:{kwargs}"
+                cache_key = f"{func.__module__}.{func.__qualname__}:{args}:{sorted(kwargs.items())}"
 
             # 尝试从缓存获取
-            result = cache.get(cache_key)
-            if result is not None:
+            result = cache.get(cache_key, missing)
+            if result is not missing:
                 return result
 
             # 执行函数并缓存结果

@@ -7,6 +7,7 @@
 """
 
 import os
+import re
 import sys
 import json
 import argparse
@@ -227,106 +228,8 @@ class PerformanceMonitor:
             return []
 
 
-class StateManager:
-    """状态管理器 - 支持断点续传"""
-    def __init__(self, state_file: str = "system_state.json"):
-        self.state_file = Path(state_file)
-        self.current_state = {}
-        self.lock = threading.Lock()
-    
-    def save_state(self, state_data: Dict):
-        """保存当前状态"""
-        with self.lock:
-            self.current_state.update(state_data)
-            self.current_state['timestamp'] = datetime.now().isoformat()
-            
-            try:
-                with open(self.state_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.current_state, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f"状态保存失败: {e}")
-    
-    def load_state(self) -> Dict:
-        """加载之前的状态"""
-        with self.lock:
-            if self.state_file.exists():
-                try:
-                    with open(self.state_file, 'r', encoding='utf-8') as f:
-                        self.current_state = json.load(f)
-                except Exception as e:
-                    print(f"状态加载失败: {e}")
-                    self.current_state = {}
-            return self.current_state.copy()
-    
-    def can_resume(self) -> bool:
-        """检查是否可以恢复"""
-        state = self.load_state()
-        return len(state) > 0 and state.get('processing', False)
-    
-    def clear_state(self):
-        """清除状态"""
-        with self.lock:
-            self.current_state = {}
-            if self.state_file.exists():
-                self.state_file.unlink()
-
-
-class IntelligentCache:
-    """智能缓存系统"""
-    def __init__(self, cache_dir: str = "./cache"):
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
-        self.search_cache = {}
-        self.ai_response_cache = {}
-        self.cache_ttl = 3600  # 1小时缓存
-    
-    def get_cached_search(self, query: str, max_results: int) -> Optional[Dict]:
-        """获取缓存的搜索结果"""
-        cache_key = f"{query}_{max_results}"
-        if cache_key in self.search_cache:
-            cache_data = self.search_cache[cache_key]
-            # 检查缓存是否过期
-            cache_time = datetime.fromisoformat(cache_data['timestamp'])
-            if (datetime.now() - cache_time).total_seconds() < self.cache_ttl:
-                return cache_data
-            else:
-                del self.search_cache[cache_key]
-        return None
-    
-    def cache_search_result(self, query: str, max_results: int, results: List):
-        """缓存搜索结果"""
-        cache_key = f"{query}_{max_results}"
-        self.search_cache[cache_key] = {
-            'results': results,
-            'timestamp': datetime.now().isoformat(),
-            'count': len(results)
-        }
-    
-    def get_cached_ai_response(self, prompt_hash: str) -> Optional[str]:
-        """获取缓存的AI响应"""
-        cached_data = self.ai_response_cache.get(prompt_hash)
-        
-        if cached_data and isinstance(cached_data, dict):
-            response = cached_data.get('response')
-            return response
-        elif cached_data is not None:
-            return cached_data
-        
-        return None
-    
-    def cache_ai_response(self, prompt_hash: str, response: str):
-        """缓存AI响应"""
-        self.ai_response_cache[prompt_hash] = {
-            'response': response,
-            'timestamp': datetime.now().isoformat()
-        }
-    
-    def clear_cache(self):
-        """清除缓存"""
-        self.search_cache.clear()
-        self.ai_response_cache.clear()
-        for cache_file in self.cache_dir.glob("*.cache"):
-            cache_file.unlink()
+from workflow_runtime import StateManager, IntelligentCache, content_key
+from workflow_exports import publish_review
 
 
 class ProgressTracker:
@@ -415,7 +318,7 @@ class IntelligentLiteratureSystem:
     """智能文献检索与综述生成系统 v2.0"""
     
     def __init__(self, ai_config_name: str = None, interactive_mode: bool = True, 
-                 enable_cache: bool = True, enable_state: bool = True):
+                 enable_cache: bool = True, enable_state: bool = True, event_sink=None):
         """
         初始化系统
         
@@ -428,7 +331,7 @@ class IntelligentLiteratureSystem:
         # 系统启动时自动清理残留文件
         print("智能文献检索与综述生成系统 v2.0")
         print("=" * 60)
-        SystemCleaner.cleanup_on_startup(verbose=True)
+        self.event_sink = event_sink
         print("=" * 60)
         
         self.ai_config_name = ai_config_name
@@ -479,11 +382,11 @@ class IntelligentLiteratureSystem:
         print("\n[PACKAGE] 正在并行初始化系统组件...")
         
         self.performance_monitor.start_timing("组件初始化")
-        progress_tracker = ProgressTracker(6, "系统组件初始化")
+        progress_tracker = ProgressTracker(5, "系统组件初始化")
         
         try:
             # 显示初始进度
-            safe_print("[0/6] 系统组件初始化: 开始初始化...")
+            safe_print("[0/5] 系统组件初始化: 开始初始化...")
             safe_print("[..........................] 0.0% - 用时: 0.0s")
             
             # 先单独初始化意图分析器（避免交互界面混乱）
@@ -495,7 +398,6 @@ class IntelligentLiteratureSystem:
             with ThreadPoolExecutor(max_workers=5) as executor:
                 # 提交其他初始化任务（排除意图分析器）
                 future_to_component = {
-                    executor.submit(self._init_data_processor_safe): ("数据处理器", safe_print),
                     executor.submit(self._init_pubmed_searcher_safe): ("PubMed检索器", safe_print),
                     executor.submit(self._init_literature_filter_safe): ("文献筛选器", safe_print),
                     executor.submit(self._init_outline_generator_safe): ("大纲生成器", safe_print),
@@ -511,7 +413,7 @@ class IntelligentLiteratureSystem:
                     try:
                         result = future.result()
                         results[component_name] = result
-                        progress_tracker.update(component_name, "初始化成功")
+                        progress_tracker.update(component_name, "初始化成功" if result else "初始化失败")
                     except Exception as e:
                         results[component_name] = False
                         error_msg = f"{component_name}初始化失败: {str(e)}"
@@ -526,10 +428,6 @@ class IntelligentLiteratureSystem:
             if failed_critical:
                 error_msg = f"关键组件初始化失败: {', '.join(failed_critical)}"
                 raise SystemError("系统初始化", "关键组件失败", error_msg)
-            
-            # 显示配置信息
-            print("\n[LIST] 正在显示系统配置信息...")
-            self._display_model_configuration()
             
             init_time = self.performance_monitor.end_timing("组件初始化")
             print(f"\n[OK] 系统组件初始化完成！并行初始化用时: {init_time:.2f}秒")
@@ -549,16 +447,6 @@ class IntelligentLiteratureSystem:
             solution = "检查依赖包和配置文件，或使用调试模式查看详细信息"
             raise SystemError("系统初始化", "初始化异常", error_msg, solution)
     
-    def _init_data_processor(self) -> bool:
-        """初始化数据处理器"""
-        try:
-            self.data_processor = JournalDataProcessor()
-            return True
-        except FileNotFoundError:
-            print("[WARN]  期刊数据文件未找到，将使用基础筛选功能")
-            self.data_processor = None
-            return True
-    
     def _init_data_processor_safe(self) -> bool:
         """线程安全的数据处理器初始化"""
         try:
@@ -573,8 +461,8 @@ class IntelligentLiteratureSystem:
             self.performance_monitor.end_timing("数据处理器初始化")
             raise SystemError("数据处理器", "初始化失败", str(e))
     
-    def _init_intent_analyzer(self) -> bool:
-        """初始化意图分析器"""
+    def _init_intent_analyzer_safe(self) -> bool:
+        """线程安全的意图分析器初始化"""
         try:
             self.intent_analyzer = IntentAnalyzer(
                 config_name=self.ai_config_name, 
@@ -583,131 +471,6 @@ class IntelligentLiteratureSystem:
             return True
         except Exception as e:
             raise SystemError("意图分析器", "初始化失败", str(e))
-    
-    def _init_intent_analyzer_safe(self) -> bool:
-        """线程安全的意图分析器初始化"""
-        try:
-            self.intent_analyzer = IntentAnalyzer(
-                config_name=self.ai_config_name, 
-                interactive=False  # 强制非交互模式
-            )
-            return True
-        except Exception as e:
-            raise SystemError("意图分析器", "初始化失败", str(e))
-    
-    def _init_pubmed_searcher(self) -> bool:
-        """初始化PubMed检索器"""
-        try:
-            self.pubmed_searcher = PubMedSearcher()
-            return True
-        except Exception as e:
-            raise SystemError("PubMed检索器", "初始化失败", str(e))
-    
-    def _init_literature_filter(self) -> bool:
-        """初始化文献筛选器"""
-        try:
-            # 使用线程来限制初始化时间，避免阻塞
-            import threading
-            import time
-            
-            result = {'success': False, 'error': None, 'filter': None}
-            
-            def init_filter():
-                try:
-                    filter_obj = LiteratureFilter()
-                    result['filter'] = filter_obj
-                    result['success'] = True
-                except Exception as e:
-                    result['error'] = str(e)
-                    result['success'] = False
-            
-            # 启动初始化线程
-            init_thread = threading.Thread(target=init_filter)
-            init_thread.daemon = True
-            init_thread.start()
-            
-            # 等待最多30秒
-            init_thread.join(timeout=30)
-            
-            if init_thread.is_alive():
-                print("[WARN] 文献筛选器初始化超时，跳过期刊数据加载")
-                # 创建一个简单的筛选器实例
-                self.literature_filter = LiteratureFilter.__new__(LiteratureFilter)
-                self.literature_filter.zky_data = pd.DataFrame()
-                self.literature_filter.jcr_data = pd.DataFrame()
-                self.literature_filter.issn_to_journal_info = {}
-                self.literature_filter.config = FilterConfig()
-                self.literature_filter.journal_cache = JournalInfoCache(self.literature_filter.config)
-                self.literature_filter.performance_stats = {
-                    'total_articles_processed': 0,
-                    'total_filter_time': 0,
-                    'cache_hits': 0,
-                    'parallel_batches': 0,
-                    'memory_usage_mb': 0,
-                    'errors': 0
-                }
-                return True
-            elif result['success']:
-                self.literature_filter = result['filter']
-                return True
-            else:
-                raise SystemError("文献筛选器", "初始化失败", result['error'])
-                
-        except Exception as e:
-            raise SystemError("文献筛选器", "初始化失败", str(e))
-    
-    def _init_outline_generator(self) -> bool:
-        """初始化大纲生成器"""
-        try:
-            self.outline_generator = ReviewOutlineGenerator(self.ai_config_name)
-            return True
-        except Exception as e:
-            raise SystemError("大纲生成器", "初始化失败", str(e))
-    
-    def _init_review_generator(self) -> bool:
-        """初始化文章生成器"""
-        try:
-            # 使用线程来限制初始化时间，避免阻塞
-            import threading
-            import time
-            
-            result = {'success': False, 'error': None, 'generator': None}
-            
-            def init_generator():
-                try:
-                    generator = MedicalReviewGenerator(self.ai_config_name)
-                    result['generator'] = generator
-                    result['success'] = True
-                except Exception as e:
-                    result['error'] = str(e)
-                    result['success'] = False
-            
-            # 启动初始化线程
-            init_thread = threading.Thread(target=init_generator)
-            init_thread.daemon = True
-            init_thread.start()
-            
-            # 等待最多10秒
-            init_thread.join(timeout=10)
-            
-            if init_thread.is_alive():
-                # 线程还在运行，说明超时了
-                print("[WARN] 文章生成器初始化超时，跳过此组件")
-                return False
-            elif result['success']:
-                # 初始化成功
-                self.review_generator = result['generator']
-                return True
-            else:
-                # 初始化失败
-                print(f"[WARN] 文章生成器初始化失败: {result['error']}")
-                print("提示: 文章生成功能将不可用，但其他功能正常")
-                return False
-                
-        except Exception as e:
-            print(f"[WARN] 文章生成器初始化失败: {e}")
-            print("提示: 文章生成功能将不可用，但其他功能正常")
-            return False
     
     def _init_pubmed_searcher_safe(self) -> bool:
         """线程安全的PubMed检索器初始化"""
@@ -834,53 +597,6 @@ class IntelligentLiteratureSystem:
             self.performance_monitor.end_timing("文章生成器初始化")
             return False
     
-    def _display_model_configuration(self):
-        """显示各组件使用的模型配置"""
-        cache_file = "ai_model_cache.json"
-        
-        print("\n[AI] AI模型配置信息:")
-        print("=" * 50)
-        
-        if os.path.exists(cache_file):
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    
-                    print("[LIST] 统一模型配置:")
-                    print(f"   配置服务: {config.get('config_name', '未知')}")
-                    print(f"   使用模型: {config.get('model_id', '未知')}")
-                    
-                    params = config.get('parameters', {})
-                    print(f"   统一参数: temperature={params.get('temperature', 'N/A')}, ")
-                    print(f"              max_tokens={params.get('max_tokens', 'N/A')}")
-                    
-                    print(f"   意图分析器: 使用统一参数 + stream=True")
-                    print(f"   大纲生成器: 使用统一参数 + stream=True") 
-                    print(f"   文章生成器: 使用统一参数 + stream=True")
-                    print("   [OK] 所有组件使用完全相同的AI服务、模型、参数和流式输出")
-                    
-                    # 显示性能优化信息
-                    if self.enable_cache:
-                        print("   [START] 缓存系统: 已启用 (AI响应和搜索结果缓存)")
-                    if self.enable_state:
-                        print("   [SAVE] 状态管理: 已启用 (断点续传支持)")
-                    
-            except Exception as e:
-                print(f"   [WARN]  无法读取模型配置: {e}")
-                if self.enable_cache:
-                    print("   [START] 缓存系统: 已启用")
-                if self.enable_state:
-                    print("   [SAVE] 状态管理: 已启用")
-        else:
-            print("   [WARN]  未找到模型配置缓存文件")
-            print("   [INFO] 提示: 首次运行时将自动生成配置缓存")
-            if self.enable_cache:
-                print("   [START] 缓存系统: 已启用")
-            if self.enable_state:
-                print("   [SAVE] 状态管理: 已启用")
-        
-        print("=" * 50)
-    
     def get_search_count_only(self, query: str) -> Optional[int]:
         """
         仅获取搜索结果数量，不获取详细内容
@@ -911,7 +627,8 @@ class IntelligentLiteratureSystem:
             }
             
             try:
-                response = requests.get(base_url, params=params, timeout=30)
+                self.pubmed_searcher._prepare_request(params)
+                response = self.pubmed_searcher.session.get(base_url, params=params, timeout=30)
                 response.raise_for_status()
                 
                 data = response.json()
@@ -979,23 +696,12 @@ class IntelligentLiteratureSystem:
         
         try:
             # 检查缓存
-            cache_key = f"intent_analysis_{hash(user_query)}"
-            cached_result = None
-            if self.cache_system:
-                cached_result = self.cache_system.get_cached_ai_response(cache_key)
-            
-            if cached_result:
-                print("使用缓存的意图分析结果")
-                # 这里需要从缓存结果中重构SearchCriteria对象
-                # 为了简化，我们仍然重新分析，但后续可以改进缓存结构
-                
+            self._emit_event('stage', {'stage': 'intent'})
             self.search_criteria = self.intent_analyzer.analyze_intent(user_query)
+            for key, value in getattr(self, 'criteria_overrides', {}).items():
+                setattr(self.search_criteria, key, value)
             self.intent_analyzer.print_analysis_result(self.search_criteria)
-            
-            # 缓存结果
-            if self.cache_system:
-                criteria_str = str(self.search_criteria.__dict__)
-                self.cache_system.cache_ai_response(cache_key, criteria_str)
+            self._emit_event('criteria', self.search_criteria.__dict__)
             
             analysis_time = self.performance_monitor.end_timing("意图分析")
             progress_tracker.update("用户意图分析", f"完成 (用时: {analysis_time:.1f}s)")
@@ -1017,6 +723,7 @@ class IntelligentLiteratureSystem:
         
         # 第2步：文献检索
         print("\n第2步：PubMed文献检索...")
+        self._emit_event('stage', {'stage': 'search'})
         self.performance_monitor.start_timing("文献检索")
         
         try:
@@ -1027,6 +734,8 @@ class IntelligentLiteratureSystem:
             if self.interactive_mode:
                 total_count = self.get_search_count_only(pubmed_query)
                 if total_count is not None:
+                    if total_count == 0:
+                        return {"success": False, "error": "检索结果为0，请调整检索条件"}
                     print(f"\n[STAT] 根据您的检索需求，共找到约 {total_count} 篇相关文献")
                     print("=" * 50)
                     
@@ -1166,6 +875,7 @@ class IntelligentLiteratureSystem:
         
         # 第2步已经完成了用户需求筛选，直接使用筛选后的结果
         self.filtered_results = self.literature_results
+        self._emit_event('literature', {'articles': self.filtered_results})
         print(f"[OK] 文献检索完成，共获取 {len(self.filtered_results)} 篇符合条件文献")
         
         progress_tracker.update("文献检索", f"完成 (获取 {len(self.filtered_results)} 篇)")
@@ -1183,6 +893,7 @@ class IntelligentLiteratureSystem:
         
         # 第3步：生成综述大纲
         print("\n第3步：生成综述大纲...")
+        self._emit_event('stage', {'stage': 'outline'})
         self.performance_monitor.start_timing("大纲生成")
         
         try:
@@ -1191,7 +902,7 @@ class IntelligentLiteratureSystem:
             print(f"核心研究主题提取: '{user_query}' → '{research_topic}'")
             
             # 检查大纲缓存
-            outline_cache_key = f"outline_{hash(research_topic + str(len(self.filtered_results)))}"
+            outline_cache_key = content_key('outline', research_topic, self.filtered_results, self.ai_config_name)
             cached_outline = None
             if self.cache_system:
                 cached_outline = self.cache_system.get_cached_ai_response(outline_cache_key)
@@ -1210,7 +921,7 @@ class IntelligentLiteratureSystem:
             
             # 验证大纲内容是否有效
             if not self.outline_content or "错误" in self.outline_content or len(self.outline_content.strip()) < 50:
-                print(f"大纲生成返回无效内容: {self.outline_content[:100]}...")
+                print(f"大纲生成返回无效内容: {str(self.outline_content)[:100]}...")
                 return {"success": False, "error": "大纲生成返回无效内容"}
             
             outline_time = self.performance_monitor.end_timing("大纲生成")
@@ -1233,6 +944,7 @@ class IntelligentLiteratureSystem:
             
             # 保存大纲文件路径供最终结果使用
             self.final_outline_file = outline_file
+            self._emit_event('outline', {'content': self.outline_content})
                 
         except Exception as e:
             self.performance_monitor.end_timing("大纲生成")
@@ -1241,6 +953,7 @@ class IntelligentLiteratureSystem:
         
         # 第4步：生成综述文章
         print("\n第4步：生成综述文章...")
+        self._emit_event('stage', {'stage': 'review'})
         self.performance_monitor.start_timing("文章生成")
         
         try:
@@ -1258,71 +971,26 @@ class IntelligentLiteratureSystem:
             output_file = self._generate_output_filename(research_topic)
             
             # 检查文章缓存
-            article_cache_key = f"article_{hash(review_title + str(len(self.filtered_results)))}"
+            article_cache_key = content_key('article', review_title, self.filtered_results, self.outline_content, self.ai_config_name)
             cached_article = None
             if self.cache_system:
                 cached_article = self.cache_system.get_cached_ai_response(article_cache_key)
             
-            if cached_article:
-                print("使用缓存的综述文章")
-                review_content = cached_article
-                success = True
+            md_path, docx_path = publish_review(
+                self.review_generator, temp_outline_file, temp_literature_file,
+                review_title, output_file, user_query, system_config.REVIEW_FORMAT.lower(),
+                cached_content=cached_article,
+            )
+            if self.cache_system and md_path:
+                self.cache_system.cache_ai_response(article_cache_key, Path(md_path).read_text(encoding='utf-8'))
+            print(f"综述文章生成完成: {md_path or docx_path}")
+            from workflow_exports import cited_articles
+            cited = cited_articles(getattr(self.review_generator, 'last_saved_content', ''), self.filtered_results)
+            if cited:
+                self._save_literature_ris(user_query, cited)
             else:
-                # 根据配置决定是否导出DOCX
-                export_format = system_config.REVIEW_FORMAT.lower()
-                should_export_docx = export_format in ['docx', 'both']
-                should_export_md = export_format in ['md', 'both']
+                print('[WARN] 未能从综述正文识别已引用文献，未生成最终纳入RIS；请核对正文引文')
 
-                md_path, docx_path = self.review_generator.generate_from_files(
-                    outline_file=temp_outline_file,
-                    literature_file=temp_literature_file,
-                    title=review_title,
-                    output_filename=output_file,
-                    user_input=user_query,
-                    export_docx=should_export_docx,
-                    export_md=should_export_md
-                )
-
-                success = bool(md_path or docx_path)  # MD或DOCX任一成功就算成功
-
-                if not success:
-                    print("综述文章生成失败，尝试备用方法...")
-                    # 尝试直接返回生成的内容
-                    try:
-                        review_content = self.review_generator.generate_complete_review_article(
-                            temp_outline_file, temp_literature_file, review_title
-                        )
-                        if review_content:
-                            success = True
-                            # 确保输出目录存在
-                            os.makedirs(os.path.join("output", "综述文章"), exist_ok=True)
-                            full_path = os.path.join("output", "综述文章", output_file)
-                            
-                            # 保存生成的内容
-                            with open(full_path, 'w', encoding='utf-8') as f:
-                                f.write(review_content)
-                            print(f"综述文章已保存（备用方法）: {full_path}")
-                            
-                            # 缓存文章结果
-                            if self.cache_system:
-                                self.cache_system.cache_ai_response(article_cache_key, review_content)
-                        else:
-                            return {"success": False, "error": "综述文章生成失败"}
-                    except Exception as e:
-                        print(f"备用方法也失败: {e}")
-                        return {"success": False, "error": "综述文章生成失败"}
-
-            if success:
-                # 根据实际生成的文件检查
-                if md_path and os.path.exists(md_path):
-                    print(f"综述文章生成完成: {md_path}")
-                elif docx_path and os.path.exists(docx_path):
-                    print(f"综述文章生成完成: {docx_path}")
-                else:
-                    print("主方法生成完成但未找到文件")
-            else:
-                return {"success": False, "error": "综述文章生成失败"}
-            
             # 清理临时文件
             self._cleanup_temp_files([temp_outline_file, temp_literature_file])
             
@@ -1351,7 +1019,7 @@ class IntelligentLiteratureSystem:
             "total_found": len(self.literature_results),
             "filtered_count": len(self.filtered_results),
             "outline_file": getattr(self, 'final_outline_file', None),
-            "review_file": os.path.join("综述文章", output_file) if 'output_file' in locals() else None,
+            "review_file": md_path,
             "docx_file": docx_path if 'docx_path' in locals() and docx_path else None,
             "processing_time": workflow_time,
             "performance_report": performance_report
@@ -1594,6 +1262,23 @@ class IntelligentLiteratureSystem:
         
         return f"综述-{safe_topic}-{timestamp}.md"
     
+    def _save_literature_ris(self, user_query: str, literature_data: List[Dict]):
+        if not literature_data:
+            return None
+        import re
+        safe = re.sub(r'[^\w\s\u4e00-\u9fff-]', '', user_query).strip().replace(' ', '_')[:50]
+        path = os.path.join('output', '文献检索结果', f'{safe}-最终纳入综述文献.ris')
+        with open(path, 'w', encoding='utf-8') as stream:
+            for article in literature_data:
+                stream.write('TY  - JOUR\n')
+                stream.write(f"TI  - {article.get('title', '')}\n")
+                authors = article.get('authors', [])
+                if isinstance(authors, list):
+                    for author in authors:
+                        stream.write(f"AU  - {author}\n")
+                stream.write(f"JO  - {article.get('journal', '')}\nPY  - {article.get('year', '')}\nPMID  - {article.get('pmid', '')}\nER  - \n\n")
+        print(f'[FILE] 最终纳入综述文献 RIS 已保存至: {path}')
+        return path
     def _cleanup_temp_files(self, files: List[str]):
         """清理临时文件"""
         for file_path in files:
@@ -1716,6 +1401,11 @@ class IntelligentLiteratureSystem:
             print(f"... 还有 {len(self.filtered_results) - 3} 篇文献")
         print("=" * 40)
     
+    def _emit_event(self, kind, payload):
+        sink = getattr(self, 'event_sink', None)
+        if sink is not None:
+            sink(kind, payload)
+
     def _ask_user_continue(self) -> bool:
         """
         询问用户是否继续生成综述大纲
@@ -1723,6 +1413,8 @@ class IntelligentLiteratureSystem:
         Returns:
             bool: True表示继续，False表示返回重新输入
         """
+        if getattr(self, 'review_confirmation', None):
+            return self.review_confirmation()
         if not self.interactive_mode:
             # 非交互模式默认继续
             return True
@@ -1885,7 +1577,7 @@ class IntelligentLiteratureSystem:
             eissn = article.get('eissn', '')
             
             # 获取期刊质量信息
-            journal_info = self.literature_filter.get_journal_info_optimized(issn, eissn)
+            journal_info = self.literature_filter.get_journal_info_optimized(issn, eissn, article.get('journal', ''))
             
             # 添加期刊信息到文章数据中
             enriched_article = article.copy()
@@ -1897,7 +1589,9 @@ class IntelligentLiteratureSystem:
             if (i + 1) % 50 == 0:
                 print(f"期刊信息匹配进度: {i + 1}/{total_count}")
         
-        print(f"期刊信息匹配完成，成功匹配: {len([r for r in enriched_results if r['journal_info']])}/{total_count} 篇")
+        for field, label in (('impact_factor', '影响因子'), ('cas_zone', '中科院分区'), ('jcr_quartile', 'JCR分区'), ('new_rui_zone', '新锐2026分区')):
+            matched = sum(result['journal_info'].get(field) is not None for result in enriched_results)
+            print(f"期刊信息匹配：{label} {matched}/{total_count} 篇")
         return enriched_results
     
     def _filter_by_user_criteria(self, enriched_results: List[Dict], search_criteria) -> List[str]:
@@ -1920,6 +1614,7 @@ class IntelligentLiteratureSystem:
         min_impact_factor = getattr(search_criteria, 'min_if', 0) or 0
         target_zones = getattr(search_criteria, 'cas_zones', [])
         target_quartiles = getattr(search_criteria, 'jcr_quartiles', [])
+        target_new_rui = getattr(search_criteria, 'new_rui_2026', [])
         
             
         for i, article in enumerate(enriched_results):
@@ -1933,13 +1628,18 @@ class IntelligentLiteratureSystem:
                 # 检查影响因子条件
                 if min_impact_factor > 0:
                     impact_factor = journal_info.get('impact_factor')
-                    if not impact_factor or float(impact_factor) < min_impact_factor:
+                    try:
+                        invalid_if = impact_factor is None or float(impact_factor) < min_impact_factor
+                    except (TypeError, ValueError):
+                        invalid_if = True
+                    if invalid_if:
                         should_include = False
                 
                 # 检查中科院分区条件
                 if should_include and target_zones:
                     cas_zone = journal_info.get('cas_zone')
-                    if not cas_zone or cas_zone not in target_zones:
+                    match = re.search(r'([1-4])', str(cas_zone)) if cas_zone else None
+                    if not match or int(match.group(1)) not in target_zones:
                         should_include = False
                 
                 # 检查JCR分区条件
@@ -1948,6 +1648,9 @@ class IntelligentLiteratureSystem:
                     if not jcr_quartile or jcr_quartile not in target_quartiles:
                         should_include = False
             
+            if should_include and target_new_rui:
+                should_include = journal_info.get('new_rui_zone') in target_new_rui
+
             if should_include:
                 filtered_pmids.append(pmid)
             
@@ -2269,3 +1972,6 @@ async def main_async():
 
 if __name__ == "__main__":
     main()
+
+
+

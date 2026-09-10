@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from openai_protocol import is_model_compatible
 from ai_client import AIClient, ConfigManager, ChatMessage
 from prompts_manager import PromptsManager
 from shared_config import system_config
@@ -175,8 +176,8 @@ class ReviewOutlineGenerator:
                 print(f"[OK] 使用缓存模型配置: {self.model_id} (参数与意图分析器完全一致)")
             else:
                 # 如果没有缓存，使用默认配置
-                print("[WARN] 未找到模型配置缓存，使用默认配置")
-                self.model_id = system_config.PREFERRED_MODEL
+                print("[INFO] 使用当前 AI 配置")
+                self.model_id = self.config.default_model or system_config.PREFERRED_MODEL
                 self.model_parameters = {
                     "temperature": 0.1,
                     "stream": True,
@@ -195,7 +196,13 @@ class ReviewOutlineGenerator:
             try:
                 import json
                 with open(cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    cached = json.load(f)
+                if cached.get('config_name') and cached.get('config_name') != self.config.name:
+                    return None
+                if not is_model_compatible(self.config.base_url, cached.get('model_id')):
+                    print(f"[WARN] 忽略与当前 API 不匹配的缓存模型: {cached.get('model_id')}")
+                    return None
+                return cached
             except Exception as e:
                 print(f"加载模型配置缓存失败: {e}")
         return None
