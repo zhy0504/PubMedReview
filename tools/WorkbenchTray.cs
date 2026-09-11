@@ -30,6 +30,9 @@ sealed class OwnedProcess : IDisposable {
             start.RedirectStandardInput = true; start.RedirectStandardOutput = true; start.RedirectStandardError = true;
             start.StandardOutputEncoding = Encoding.UTF8; start.StandardErrorEncoding = Encoding.UTF8;
             start.EnvironmentVariables["WORKBENCH_TRAY"] = "1";
+            start.EnvironmentVariables["PYTHONUTF8"] = "1";
+            start.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            start.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
             Process = new Process(); Process.StartInfo = start; Process.Start();
             if (!AssignProcessToJobObject(job, Process.Handle)) { Process.Kill(); throw new System.ComponentModel.Win32Exception(); }
             Process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args) { if (args.Data != null) output(args.Data); };
@@ -153,9 +156,13 @@ sealed class WorkbenchTray : Form {
             Directory.CreateDirectory(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs"));
             try {
                 var environmentChecked = new ManualResetEvent(false);
-                var environmentCommand = "$python = $null; if (Test-Path './.venv/Scripts/python.exe') { $python = (Resolve-Path './.venv/Scripts/python.exe').Path } elseif (Get-Command python -ErrorAction SilentlyContinue) { $python = (Get-Command python).Source } elseif (Get-Command py -ErrorAction SilentlyContinue) { $python = 'py' } else { throw 'Python not found' }; & $python './tools/environment_manager.py' --status";
-                var environmentRunner = new OwnedProcess(AppDomain.CurrentDomain.BaseDirectory, environmentCommand, delegate(string line) { if (line.IndexOf("[ENV]", StringComparison.Ordinal) >= 0) environmentChecked.Set(); });
-                using (environmentRunner) { if (!environmentChecked.WaitOne(15000) || environmentRunner.Process.HasExited && !environmentChecked.WaitOne(0)) throw new Exception("Environment check invocation failed"); }
+                var environmentCommand = "& './.venv/Scripts/python.exe' './tools/environment_manager.py' --ensure; exit $LASTEXITCODE";
+                var environmentRunner = new OwnedProcess(AppDomain.CurrentDomain.BaseDirectory, environmentCommand, delegate(string line) { if (line == "[ENV] 总体：可以运行") environmentChecked.Set(); });
+                using (environmentRunner) {
+                    if (!environmentRunner.Process.WaitForExit(60000)) throw new Exception("Environment check timed out");
+                    environmentRunner.Process.WaitForExit();
+                    if (environmentRunner.Process.ExitCode != 0 || !environmentChecked.WaitOne(0)) throw new Exception("Environment check or Chinese UTF-8 forwarding failed");
+                }
                 int child = 0; var received = new ManualResetEvent(false);
                 var runner = new OwnedProcess(AppDomain.CurrentDomain.BaseDirectory, "$child=Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 60' -PassThru; Write-Output $child.Id; Start-Sleep -Seconds 60", delegate(string line) { int value; if (int.TryParse(line, out value)) { child = value; received.Set(); } });
                 using (runner) { if (!received.WaitOne(10000) || runner.Process.HasExited) throw new Exception("Startup/log forwarding failed"); }

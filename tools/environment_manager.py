@@ -233,9 +233,15 @@ def main(argv=None) -> int:
     group.add_argument("--pandoc", action="store_true", help="安装 Pandoc")
     group.add_argument("--update-pandoc", action="store_true", help="更新 Pandoc")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出检测结果")
+    group.add_argument("--ensure", action="store_true", help="Check and repair before startup")
     args = parser.parse_args(argv)
     try:
-        if args.repair:
+        if args.ensure:
+            status = inspect_environment()
+            print(format_status(status), flush=True)
+            if not status["ready"]:
+                status = repair_environment()
+        elif args.repair:
             status = repair_environment()
         elif args.pandoc:
             status = install_pandoc(update=False)
@@ -244,7 +250,7 @@ def main(argv=None) -> int:
         else:
             status = inspect_environment()
             print(json.dumps(status, ensure_ascii=False) if args.json else format_status(status), flush=True)
-        return 0 if status.get("ready", True) or args.repair or args.pandoc or args.update_pandoc else 0
+        return 0 if status.get("ready", False) else 1
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"[FIX] 失败：{error}", file=sys.stderr, flush=True)
         return 1

@@ -1,4 +1,5 @@
 import importlib.util
+import pytest
 from pathlib import Path
 
 
@@ -8,6 +9,38 @@ def load_environment_manager():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize('initial,repaired,expected,calls', [
+    (True, True, 0, 0), (False, True, 0, 1), (False, False, 1, 1),
+])
+def test_startup_ensure(initial, repaired, expected, calls, monkeypatch):
+    module = load_environment_manager()
+    repairs = []
+    monkeypatch.setattr(module, 'inspect_environment', lambda: {'ready': initial})
+    monkeypatch.setattr(module, 'format_status', lambda status: str(status))
+    def repair():
+        repairs.append(True)
+        return {'ready': repaired}
+    monkeypatch.setattr(module, 'repair_environment', repair)
+    assert module.main(['--ensure']) == expected
+    assert len(repairs) == calls
+
+
+def test_startup_repair_failure(monkeypatch):
+    module = load_environment_manager()
+    monkeypatch.setattr(module, 'inspect_environment', lambda: {'ready': False})
+    monkeypatch.setattr(module, 'format_status', lambda status: str(status))
+    def repair():
+        raise RuntimeError('installation failed')
+    monkeypatch.setattr(module, 'repair_environment', repair)
+    assert module.main(['--ensure']) == 1
+
+
+def test_unready_status_is_failure(monkeypatch):
+    module = load_environment_manager()
+    monkeypatch.setattr(module, 'inspect_environment', lambda: {'ready': False})
+    assert module.main(['--status', '--json']) == 1
 
 
 def test_inspect_environment_reports_all_repairable_components(tmp_path, monkeypatch):
